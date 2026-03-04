@@ -44,7 +44,8 @@ jobs:
         run: ./gradlew build
 
       - name: Build MSI installer
-        run: ./gradlew :gui:packageMsi -PappVersion=${{ needs.validate-tag.outputs.version }}
+        shell: bash
+        run: ./gradlew :gui:packageMsi "-PappVersion=${{ needs.validate-tag.outputs.version }}"
 
       - name: Generate SHA256 checksum
         shell: bash
@@ -80,7 +81,7 @@ jobs:
         run: ./gradlew build
 
       - name: Build DEB package
-        run: ./gradlew :gui:packageDeb -PappVersion=${{ needs.validate-tag.outputs.version }}
+        run: ./gradlew :gui:packageDeb "-PappVersion=${{ needs.validate-tag.outputs.version }}"
 
       - name: Generate SHA256 checksum
         run: |
