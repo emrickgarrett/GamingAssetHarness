@@ -1,0 +1,15 @@
+{
+  "id": "task-123-abc",
+  "status": "SUCCEEDED",
+  "progress": 100,
+  "model_urls": {
+    "glb": "https://assets.meshy.ai/test-model.glb",
+    "fbx": "https://assets.meshy.ai/test-model.fbx",
+    "obj": "https://assets.meshy.ai/test-model.obj"
+  },
+  "texture_urls": [
+    {
+      "base_color": "https://assets.meshy.ai/test-texture.png"
+    }
+  ]
+}
