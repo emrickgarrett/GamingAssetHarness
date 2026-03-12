@@ -197,6 +197,9 @@ private fun MainScreen(
                         onCreateFolder = { viewModel.createFolder(it) },
                         onDeleteFolder = { viewModel.deleteFolder(it) },
                         onRenameFolder = { path, newName -> viewModel.renameFolder(path, newName) },
+                        onSplitSheet = { asset, w, h, skip, bgColor, bgTol, folder ->
+                            viewModel.splitSpriteSheet(asset, w, h, skip, bgColor, bgTol, folder)
+                        },
                         modifier = Modifier.weight(1f).padding(8.dp)
                     )
 

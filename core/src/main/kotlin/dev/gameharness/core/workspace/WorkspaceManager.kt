@@ -1,6 +1,7 @@
 package dev.gameharness.core.workspace
 
 import dev.gameharness.core.model.*
+import dev.gameharness.core.util.SplitTileInfo
 import dev.gameharness.core.util.ensureDirectoryExists
 import dev.gameharness.core.util.readBytesSafely
 import dev.gameharness.core.util.writeBytesSafely
@@ -9,6 +10,7 @@ import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.Comparator
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
@@ -24,6 +26,16 @@ class WorkspaceManager(registryDir: Path) {
 
     private val log = LoggerFactory.getLogger(WorkspaceManager::class.java)
     private val registry = WorkspaceRegistry(registryDir)
+
+    companion object {
+        /** File extensions recognized for auto-import, keyed by asset subdirectory. */
+        val RECOGNIZED_EXTENSIONS: Map<String, Set<String>> = mapOf(
+            "sprites" to setOf("png", "webp", "jpg", "jpeg"),
+            "models"  to setOf("glb"),
+            "music"   to setOf("mp3", "wav", "ogg"),
+            "sfx"     to setOf("mp3", "wav", "ogg")
+        )
+    }
 
     private val json = Json {
         prettyPrint = true
@@ -141,6 +153,146 @@ class WorkspaceManager(registryDir: Path) {
         return workspace
     }
 
+    // --- Filesystem sync ---
+
+    /**
+     * Synchronizes workspace asset metadata with what actually exists on disk.
+     *
+     * Performs a two-pass reconciliation:
+     * 1. **Remove stale** — drops any [GeneratedAsset] entries whose [GeneratedAsset.filePath]
+     *    no longer exists on disk (deleted externally).
+     * 2. **Discover new** — scans each `assets/<subdirectory>/` for files with recognized
+     *    extensions that are not already tracked, and imports them as new assets with
+     *    [AssetDecision.APPROVED] status.
+     *
+     * If nothing changed, returns the original [workspace] instance (same reference)
+     * so callers can use referential equality (`===`) to skip unnecessary updates.
+     */
+    fun syncAssets(workspace: Workspace): Workspace {
+        val workspaceDir = Path.of(workspace.directoryPath)
+        if (!workspaceDir.exists()) return workspace
+
+        // --- Migration: move misplaced flat files to their correct folder directories ---
+        var migratedCount = 0
+        val migratedAssets = workspace.assets.map { asset ->
+            if (asset.folder.isNotEmpty()) {
+                val currentPath = Path.of(asset.filePath)
+                val expectedDir = resolveAssetDir(workspaceDir, asset.type, asset.folder)
+                val expectedPath = expectedDir.resolve(asset.fileName)
+
+                if (currentPath.exists() && currentPath.toAbsolutePath().normalize() != expectedPath.toAbsolutePath().normalize()) {
+                    // File is at the wrong location — migrate it
+                    expectedDir.ensureDirectoryExists()
+                    val targetPath = resolveUniqueFileName(expectedDir, asset.fileName)
+                    Files.move(currentPath, targetPath, StandardCopyOption.REPLACE_EXISTING)
+                    migratedCount++
+                    asset.copy(
+                        fileName = targetPath.fileName.toString(),
+                        filePath = targetPath.toString()
+                    )
+                } else {
+                    asset
+                }
+            } else {
+                asset
+            }
+        }
+
+        // Ensure real directories exist for all registered folders
+        for (folder in workspace.folders) {
+            for (assetType in AssetType.entries) {
+                resolveAssetDir(workspaceDir, assetType, folder).ensureDirectoryExists()
+            }
+        }
+
+        // Pass 1: Remove stale assets whose files were deleted externally
+        val liveAssets = migratedAssets.filter { asset ->
+            Path.of(asset.filePath).exists()
+        }
+        val removedCount = migratedAssets.size - liveAssets.size
+
+        // Build a set of normalized known paths for O(1) lookup in pass 2
+        val knownPaths = liveAssets.map { asset ->
+            Path.of(asset.filePath).toAbsolutePath().normalize().toString()
+        }.toSet()
+
+        // Pass 2: Discover new files in asset directories (recursive)
+        val discovered = mutableListOf<GeneratedAsset>()
+        val discoveredFolders = mutableSetOf<String>()
+
+        for (assetType in AssetType.entries) {
+            val subDir = workspaceDir.resolve("assets").resolve(assetType.subdirectory)
+            if (!subDir.exists() || !subDir.isDirectory()) continue
+
+            val allowedExtensions = RECOGNIZED_EXTENSIONS[assetType.subdirectory] ?: continue
+
+            Files.walk(subDir).use { stream ->
+                stream.forEach { path ->
+                    if (Files.isRegularFile(path)) {
+                        val fileName = path.fileName.toString()
+                        val extension = fileName.substringAfterLast('.', "").lowercase()
+
+                        if (extension in allowedExtensions) {
+                            val normalizedPath = path.toAbsolutePath().normalize().toString()
+                            if (normalizedPath !in knownPaths) {
+                                // Compute folder from relative path within the type subdirectory
+                                val relativePath = subDir.relativize(path.parent).toString().replace("\\", "/")
+                                val folder = if (relativePath == "." || relativePath.isEmpty()) "" else relativePath
+
+                                discovered.add(
+                                    GeneratedAsset(
+                                        id = java.util.UUID.randomUUID().toString(),
+                                        type = assetType,
+                                        fileName = fileName,
+                                        filePath = normalizedPath,
+                                        format = extension,
+                                        description = "Imported from disk",
+                                        sizeBytes = Files.size(path),
+                                        status = AssetDecision.APPROVED,
+                                        folder = folder
+                                    )
+                                )
+                            }
+                        }
+                    } else if (Files.isDirectory(path) && path != subDir) {
+                        // Discover subdirectories as folders
+                        val relativePath = subDir.relativize(path).toString().replace("\\", "/")
+                        if (relativePath.isNotEmpty() && relativePath != ".") {
+                            discoveredFolders.add(relativePath)
+                        }
+                    }
+                }
+            }
+        }
+
+        // If nothing changed, return the same instance for referential equality
+        val newFolders = discoveredFolders - workspace.folders
+        if (removedCount == 0 && discovered.isEmpty() && migratedCount == 0 && newFolders.isEmpty()) {
+            return workspace
+        }
+
+        val updated = workspace.copy(
+            assets = liveAssets + discovered,
+            folders = workspace.folders + newFolders
+        )
+        saveWorkspaceMetadata(updated)
+
+        if (migratedCount > 0) {
+            log.info("Migrated {} asset(s) to folder directories in workspace '{}'", migratedCount, workspace.name)
+        }
+        if (removedCount > 0) {
+            log.info("Removed {} stale asset(s) from workspace '{}'", removedCount, workspace.name)
+        }
+        if (discovered.isNotEmpty()) {
+            log.info("Discovered {} new asset(s) in workspace '{}'", discovered.size, workspace.name)
+        }
+        if (newFolders.isNotEmpty()) {
+            log.info("Discovered {} new folder(s) in workspace '{}'", newFolders.size, workspace.name)
+        }
+
+        return updated
+    }
+
     // --- Asset management ---
 
     /**
@@ -149,7 +301,7 @@ class WorkspaceManager(registryDir: Path) {
      */
     fun saveAsset(workspace: Workspace, asset: GeneratedAsset, bytes: ByteArray): Pair<Path, Workspace> {
         val workspaceDir = Path.of(workspace.directoryPath)
-        val assetDir = workspaceDir.resolve("assets").resolve(asset.type.subdirectory)
+        val assetDir = resolveAssetDir(workspaceDir, asset.type, asset.folder)
         assetDir.ensureDirectoryExists()
 
         val targetPath = assetDir.resolve(asset.fileName)
@@ -160,6 +312,61 @@ class WorkspaceManager(registryDir: Path) {
         saveWorkspaceMetadata(updated)
 
         return targetPath to updated
+    }
+
+    /**
+     * Saves multiple tiles from a sprite sheet split as individual assets.
+     *
+     * Each tile is written as a PNG to `assets/sprites/` and registered as a new
+     * [GeneratedAsset] with [AssetDecision.APPROVED] status. The tiles inherit
+     * the [originalAsset]'s virtual folder. Returns the updated workspace with
+     * all new assets appended.
+     *
+     * @param baseName the file name stem used for tile naming (e.g. `"hero_idle"`
+     *     produces `hero_idle_tile_0_0.png`, `hero_idle_tile_0_1.png`, etc.)
+     */
+    fun saveSplitAssets(
+        workspace: Workspace,
+        originalAsset: GeneratedAsset,
+        tiles: List<Pair<SplitTileInfo, ByteArray>>,
+        baseName: String
+    ): Workspace {
+        val workspaceDir = Path.of(workspace.directoryPath)
+        val assetDir = resolveAssetDir(workspaceDir, AssetType.SPRITE, originalAsset.folder)
+        assetDir.ensureDirectoryExists()
+
+        val newAssets = mutableListOf<GeneratedAsset>()
+
+        for ((tileInfo, bytes) in tiles) {
+            val fileName = "${baseName}_tile_${tileInfo.row}_${tileInfo.col}.png"
+            val targetPath = assetDir.resolve(fileName)
+            targetPath.writeBytesSafely(bytes)
+
+            val asset = GeneratedAsset(
+                id = java.util.UUID.randomUUID().toString(),
+                type = AssetType.SPRITE,
+                fileName = fileName,
+                filePath = targetPath.toString(),
+                format = "png",
+                description = "Split from ${originalAsset.fileName} (row ${tileInfo.row}, col ${tileInfo.col})",
+                generationParams = mapOf(
+                    "source" to originalAsset.fileName,
+                    "tileWidth" to tileInfo.width.toString(),
+                    "tileHeight" to tileInfo.height.toString(),
+                    "row" to tileInfo.row.toString(),
+                    "col" to tileInfo.col.toString()
+                ),
+                sizeBytes = bytes.size.toLong(),
+                status = AssetDecision.APPROVED,
+                folder = originalAsset.folder
+            )
+            newAssets.add(asset)
+        }
+
+        val updated = workspace.copy(assets = workspace.assets + newAssets)
+        saveWorkspaceMetadata(updated)
+        log.info("Saved {} split tiles from '{}' in workspace '{}'", newAssets.size, originalAsset.fileName, workspace.name)
+        return updated
     }
 
     /** Reads the raw file bytes for an asset from disk. */
@@ -221,11 +428,27 @@ class WorkspaceManager(registryDir: Path) {
         if (normalized.isNotEmpty()) {
             require(normalized in workspace.folders) { "Target folder does not exist: $normalized" }
         }
+
+        val workspaceDir = Path.of(workspace.directoryPath)
         var movedCount = 0
         val updatedAssets = workspace.assets.map { asset ->
             if (asset.id in assetIds) {
                 movedCount++
-                asset.copy(folder = normalized)
+                val oldPath = Path.of(asset.filePath)
+                val targetDir = resolveAssetDir(workspaceDir, asset.type, normalized)
+                targetDir.ensureDirectoryExists()
+
+                if (oldPath.exists()) {
+                    val newPath = resolveUniqueFileName(targetDir, asset.fileName)
+                    Files.move(oldPath, newPath, StandardCopyOption.REPLACE_EXISTING)
+                    asset.copy(
+                        folder = normalized,
+                        fileName = newPath.fileName.toString(),
+                        filePath = newPath.toString()
+                    )
+                } else {
+                    asset.copy(folder = normalized)
+                }
             } else {
                 asset
             }
@@ -255,6 +478,14 @@ class WorkspaceManager(registryDir: Path) {
             newFolders.add(current)
         }
 
+        // Create real directories under each asset type subdirectory
+        val workspaceDir = Path.of(workspace.directoryPath)
+        for (folder in newFolders) {
+            for (assetType in AssetType.entries) {
+                resolveAssetDir(workspaceDir, assetType, folder).ensureDirectoryExists()
+            }
+        }
+
         val updated = workspace.copy(folders = workspace.folders + newFolders)
         saveWorkspaceMetadata(updated)
         log.info("Created folder '{}' in workspace '{}'", normalized, workspace.name)
@@ -268,15 +499,36 @@ class WorkspaceManager(registryDir: Path) {
         val normalized = normalizeFolderPath(folderPath)
         require(normalized in workspace.folders) { "Folder does not exist: $normalized" }
 
+        val workspaceDir = Path.of(workspace.directoryPath)
         val parentFolder = normalized.substringBeforeLast("/", "")
 
-        // Move all assets in this folder or subfolders to the parent
+        // Move affected assets' files to the parent directory on disk
         val updatedAssets = workspace.assets.map { asset ->
             if (asset.folder == normalized || asset.folder.startsWith("$normalized/")) {
-                asset.copy(folder = parentFolder)
+                val oldPath = Path.of(asset.filePath)
+                val parentDir = resolveAssetDir(workspaceDir, asset.type, parentFolder)
+                parentDir.ensureDirectoryExists()
+
+                if (oldPath.exists()) {
+                    val newPath = resolveUniqueFileName(parentDir, oldPath.fileName.toString())
+                    Files.move(oldPath, newPath, StandardCopyOption.REPLACE_EXISTING)
+                    asset.copy(
+                        folder = parentFolder,
+                        fileName = newPath.fileName.toString(),
+                        filePath = newPath.toString()
+                    )
+                } else {
+                    asset.copy(folder = parentFolder)
+                }
             } else {
                 asset
             }
+        }
+
+        // Remove empty directory trees under each asset type
+        for (assetType in AssetType.entries) {
+            val folderDir = resolveAssetDir(workspaceDir, assetType, normalized)
+            deleteEmptyDirectoryTree(folderDir)
         }
 
         // Remove this folder and all subfolders from the set
@@ -304,6 +556,17 @@ class WorkspaceManager(registryDir: Path) {
         val newPath = if (parentPath.isEmpty()) newName else "$parentPath/$newName"
         require(newPath !in workspace.folders) { "A folder named '$newName' already exists at this level" }
 
+        // Rename the real directories under each asset type
+        val workspaceDir = Path.of(workspace.directoryPath)
+        for (assetType in AssetType.entries) {
+            val oldDir = resolveAssetDir(workspaceDir, assetType, normalizedOld)
+            val newDir = resolveAssetDir(workspaceDir, assetType, newPath)
+            if (oldDir.exists()) {
+                newDir.parent?.ensureDirectoryExists()
+                Files.move(oldDir, newDir, StandardCopyOption.REPLACE_EXISTING)
+            }
+        }
+
         // Update all subfolders in the set
         val updatedFolders = workspace.folders.map { folder ->
             when {
@@ -313,12 +576,20 @@ class WorkspaceManager(registryDir: Path) {
             }
         }.toSet()
 
-        // Update all asset folder references
+        // Update all asset folder references AND file paths
         val updatedAssets = workspace.assets.map { asset ->
             when {
-                asset.folder == normalizedOld -> asset.copy(folder = newPath)
-                asset.folder.startsWith("$normalizedOld/") ->
-                    asset.copy(folder = asset.folder.replaceFirst(normalizedOld, newPath))
+                asset.folder == normalizedOld -> {
+                    val newFilePath = resolveAssetDir(workspaceDir, asset.type, newPath)
+                        .resolve(asset.fileName).toString()
+                    asset.copy(folder = newPath, filePath = newFilePath)
+                }
+                asset.folder.startsWith("$normalizedOld/") -> {
+                    val newFolder = asset.folder.replaceFirst(normalizedOld, newPath)
+                    val newFilePath = resolveAssetDir(workspaceDir, asset.type, newFolder)
+                        .resolve(asset.fileName).toString()
+                    asset.copy(folder = newFolder, filePath = newFilePath)
+                }
                 else -> asset
             }
         }
@@ -341,8 +612,27 @@ class WorkspaceManager(registryDir: Path) {
         val index = workspace.assets.indexOfFirst { it.id == assetId }
         require(index >= 0) { "Asset not found: $assetId" }
 
+        val workspaceDir = Path.of(workspace.directoryPath)
         val updatedAssets = workspace.assets.mapIndexed { i, asset ->
-            if (i == index) asset.copy(folder = normalized) else asset
+            if (i == index) {
+                val oldPath = Path.of(asset.filePath)
+                val targetDir = resolveAssetDir(workspaceDir, asset.type, normalized)
+                targetDir.ensureDirectoryExists()
+
+                if (oldPath.exists()) {
+                    val newPath = resolveUniqueFileName(targetDir, asset.fileName)
+                    Files.move(oldPath, newPath, StandardCopyOption.REPLACE_EXISTING)
+                    asset.copy(
+                        folder = normalized,
+                        fileName = newPath.fileName.toString(),
+                        filePath = newPath.toString()
+                    )
+                } else {
+                    asset.copy(folder = normalized)
+                }
+            } else {
+                asset
+            }
         }
         val updated = workspace.copy(assets = updatedAssets)
         saveWorkspaceMetadata(updated)
@@ -352,6 +642,55 @@ class WorkspaceManager(registryDir: Path) {
 
     private fun normalizeFolderPath(path: String): String {
         return path.trim().trim('/').replace("\\", "/")
+    }
+
+    /**
+     * Resolves a unique file name in [directory], appending `_1`, `_2`, etc.
+     * before the extension if a file with the given [fileName] already exists.
+     */
+    private fun resolveUniqueFileName(directory: Path, fileName: String): Path {
+        var target = directory.resolve(fileName)
+        if (!target.exists()) return target
+
+        val baseName = fileName.substringBeforeLast(".")
+        val extension = fileName.substringAfterLast(".", "")
+        var counter = 1
+        while (target.exists()) {
+            val newName = if (extension.isNotEmpty()) "${baseName}_$counter.$extension" else "${baseName}_$counter"
+            target = directory.resolve(newName)
+            counter++
+        }
+        return target
+    }
+
+    /**
+     * Recursively deletes empty directories within [dir], walking bottom-up.
+     * Stops at directories that still contain files.
+     */
+    private fun deleteEmptyDirectoryTree(dir: Path) {
+        if (!dir.exists()) return
+        Files.walk(dir).use { stream ->
+            stream.sorted(Comparator.reverseOrder())
+                .filter { Files.isDirectory(it) }
+                .forEach { d ->
+                    try {
+                        Files.list(d).use { contents ->
+                            if (contents.findFirst().isEmpty) {
+                                Files.delete(d)
+                            }
+                        }
+                    } catch (_: Exception) { }
+                }
+        }
+    }
+
+    /**
+     * Resolves the asset directory for a given asset type and folder within a workspace.
+     * Returns `assets/<type>/` for root or `assets/<type>/<folder>/` for non-empty folders.
+     */
+    private fun resolveAssetDir(workspaceDir: Path, type: AssetType, folder: String): Path {
+        val baseDir = workspaceDir.resolve("assets").resolve(type.subdirectory)
+        return if (folder.isEmpty()) baseDir else baseDir.resolve(folder)
     }
 
     /** Writes per-workspace AI instructions to `workspace-instructions.md`. */

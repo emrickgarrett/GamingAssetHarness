@@ -100,5 +100,32 @@ data class AppConfig(
                 nanoBananaModel = saved?.nanoBananaModel ?: "gemini-2.5-flash-image"
             )
         }
+
+        /**
+         * Loads config for CLI usage where OpenRouter is not required.
+         * The CLI calls API clients directly without the LLM agent,
+         * so only the individual generation API keys matter.
+         */
+        fun forCli(
+            settingsManager: SettingsManager,
+            envProvider: (String) -> String? = System::getenv
+        ): AppConfig {
+            val saved = settingsManager.load()
+
+            fun resolve(envKey: String, savedValue: String?): String? {
+                val envVal = envProvider(envKey)?.trim()
+                if (!envVal.isNullOrBlank()) return envVal
+                return savedValue?.trim()?.takeIf { it.isNotBlank() }
+            }
+
+            return AppConfig(
+                openRouterApiKey = resolve("OPENROUTER_API_KEY", saved?.openRouterApiKey) ?: "",
+                geminiApiKey = resolve("GEMINI_API_KEY", saved?.geminiApiKey),
+                meshyApiKey = resolve("MESHY_API_KEY", saved?.meshyApiKey),
+                sunoApiKey = resolve("SUNO_API_KEY", saved?.sunoApiKey),
+                elevenLabsApiKey = resolve("ELEVENLABS_API_KEY", saved?.elevenLabsApiKey),
+                nanoBananaModel = saved?.nanoBananaModel ?: "gemini-2.5-flash-image"
+            )
+        }
     }
 }

@@ -11,9 +11,15 @@ import dev.gameharness.core.model.AssetReviewDecision
 import dev.gameharness.core.model.AssetType
 import dev.gameharness.core.model.GeneratedAsset
 import dev.gameharness.core.model.Workspace
+import dev.gameharness.core.util.SpriteSheetSplitter
 import dev.gameharness.core.workspace.WorkspaceManager
+import java.io.File
+import javax.imageio.ImageIO
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.nio.file.Path
@@ -39,6 +45,7 @@ class AppViewModel(
     val bridge = AgentBridgeImpl()
     private var gameAgent: GameAgent? = null
     private var agentScope: CoroutineScope? = null
+    private var syncJob: Job? = null
 
     private val _needsSetup = MutableStateFlow(true)
     /** Whether the app requires initial setup (true when no OpenRouter key is configured). */
@@ -171,8 +178,9 @@ class AppViewModel(
         saveChatHistory()
         _currentWorkspace.value = workspace
         _currentFolder.value = ""
-        gameAgent?.setWorkspace(workspace)
-        loadChatHistory(workspace)
+        syncOnce()
+        gameAgent?.setWorkspace(_currentWorkspace.value ?: workspace)
+        loadChatHistory(_currentWorkspace.value ?: workspace)
     }
 
     /** Creates a new workspace at the specified directory and selects it. */
@@ -207,6 +215,8 @@ class AppViewModel(
             workspaceManager.deleteWorkspace(workspace)
             refreshWorkspaces()
             if (_currentWorkspace.value?.directoryPath == workspace.directoryPath) {
+                syncJob?.cancel()
+                syncJob = null
                 _currentWorkspace.value = null
             }
             _snackbarMessage.tryEmit("Workspace '${workspace.name}' deleted")
@@ -258,6 +268,110 @@ class AppViewModel(
         val message = "Please revise the ${asset.type.displayName} \"${asset.fileName}\": $userRequest"
         val attachments = if (asset.type == AssetType.SPRITE) listOf(asset.filePath) else emptyList()
         sendMessage(message, attachmentPaths = attachments)
+    }
+
+    /**
+     * Splits a sprite sheet asset into individual tiles at the given dimensions.
+     *
+     * Loads the image, runs [SpriteSheetSplitter], optionally removes a background
+     * color and filters out empty tiles, encodes each remaining tile as PNG bytes,
+     * and saves them via [WorkspaceManager.saveSplitAssets]. Emits a snackbar message
+     * with the result.
+     *
+     * @param skipEmpty when true, tiles that are fully transparent are discarded
+     * @param removeBgColor if non-null, pixels matching this color (within [bgTolerance])
+     *     are made transparent before the empty check
+     * @param bgTolerance RGB Manhattan distance threshold for background removal (0–100)
+     * @param targetFolder if non-null, tiles are placed into a subfolder with this name
+     */
+    fun splitSpriteSheet(
+        asset: GeneratedAsset,
+        tileWidth: Int,
+        tileHeight: Int,
+        skipEmpty: Boolean = false,
+        removeBgColor: java.awt.Color? = null,
+        bgTolerance: Int = 30,
+        targetFolder: String? = null
+    ) {
+        var ws = _currentWorkspace.value ?: return
+        try {
+            // Create the subfolder if requested
+            if (targetFolder != null) {
+                val currentFolder = asset.folder
+                val fullFolderPath = if (currentFolder.isEmpty()) targetFolder else "$currentFolder/$targetFolder"
+                if (fullFolderPath !in ws.folders) {
+                    ws = workspaceManager.createFolder(ws, fullFolderPath)
+                }
+            }
+
+            val image = ImageIO.read(File(asset.filePath))
+                ?: throw IllegalStateException("Cannot read image: ${asset.filePath}")
+
+            val allTiles = SpriteSheetSplitter.splitAll(image, tileWidth, tileHeight)
+
+            // Apply background removal and filter empty tiles
+            val processedTiles = allTiles.mapNotNull { (info, img) ->
+                val processed = if (removeBgColor != null) {
+                    SpriteSheetSplitter.removeBackgroundColor(img, removeBgColor, bgTolerance)
+                } else {
+                    img
+                }
+                if (skipEmpty && SpriteSheetSplitter.isFullyTransparent(processed)) {
+                    null
+                } else {
+                    info to SpriteSheetSplitter.tileToBytes(processed)
+                }
+            }
+
+            // If a subfolder was requested, temporarily set the asset's folder so
+            // saveSplitAssets inherits it (tiles inherit the source asset's folder)
+            val effectiveAsset = if (targetFolder != null) {
+                val currentFolder = asset.folder
+                val fullFolderPath = if (currentFolder.isEmpty()) targetFolder else "$currentFolder/$targetFolder"
+                asset.copy(folder = fullFolderPath)
+            } else {
+                asset
+            }
+
+            val baseName = asset.fileName.substringBeforeLast(".")
+            _currentWorkspace.value = workspaceManager.saveSplitAssets(ws, effectiveAsset, processedTiles, baseName)
+            _snackbarMessage.tryEmit("Split into ${processedTiles.size} tiles")
+        } catch (e: Exception) {
+            log.error("Failed to split sprite sheet: {}", e.message, e)
+            _snackbarMessage.tryEmit("Failed to split sprite sheet: ${e.message}")
+        }
+    }
+
+    // --- Filesystem sync ---
+
+    /**
+     * Starts a background coroutine that polls [WorkspaceManager.syncAssets] every 5 seconds
+     * to detect files added or removed externally (via File Explorer, etc.).
+     */
+    private fun startAssetSync(scope: CoroutineScope) {
+        syncJob?.cancel()
+        syncJob = scope.launch {
+            while (true) {
+                syncOnce()
+                delay(5_000)
+            }
+        }
+    }
+
+    /**
+     * Performs a single filesystem sync of the current workspace.
+     * Updates [_currentWorkspace] only if changes were detected (referential inequality).
+     */
+    private fun syncOnce() {
+        val ws = _currentWorkspace.value ?: return
+        try {
+            val synced = workspaceManager.syncAssets(ws)
+            if (synced !== ws) {
+                _currentWorkspace.value = synced
+            }
+        } catch (e: Exception) {
+            log.debug("Asset sync skipped: {}", e.message)
+        }
     }
 
     // --- Folder management ---
@@ -380,10 +494,13 @@ class AppViewModel(
         }
 
         agent.start(scope)
+        startAssetSync(scope)
     }
 
     /** Stops the running agent, saves chat history, and releases API client resources. */
     fun stopAgent() {
+        syncJob?.cancel()
+        syncJob = null
         saveChatHistory()
         gameAgent?.stop()
         gameAgent = null

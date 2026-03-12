@@ -22,10 +22,14 @@ internal fun AssetDetailView(
     asset: GeneratedAsset,
     onBack: () -> Unit,
     onDelete: (assetId: String) -> Unit,
-    onRevise: (asset: GeneratedAsset, request: String) -> Unit
+    onRevise: (asset: GeneratedAsset, request: String) -> Unit,
+    onSplitSheet: (asset: GeneratedAsset, tileWidth: Int, tileHeight: Int,
+                   skipEmpty: Boolean, removeBgColor: java.awt.Color?, bgTolerance: Int,
+                   targetFolder: String?) -> Unit = { _, _, _, _, _, _, _ -> }
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showReviseDialog by remember { mutableStateOf(false) }
+    var showSplitDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -107,6 +111,14 @@ internal fun AssetDetailView(
                 Text("\u270F  Revise")
             }
 
+            if (asset.type == AssetType.SPRITE) {
+                OutlinedButton(
+                    onClick = { showSplitDialog = true }
+                ) {
+                    Text("\u2702  Split Sheet")
+                }
+            }
+
             OutlinedButton(
                 onClick = { showDeleteDialog = true },
                 colors = ButtonDefaults.outlinedButtonColors(
@@ -137,6 +149,17 @@ internal fun AssetDetailView(
                 onRevise(asset, request)
             },
             onDismiss = { showReviseDialog = false }
+        )
+    }
+
+    if (showSplitDialog) {
+        SplitSheetDialog(
+            asset = asset,
+            onSplit = { splitAsset, tw, th, skipEmpty, bgColor, bgTolerance, targetFolder ->
+                showSplitDialog = false
+                onSplitSheet(splitAsset, tw, th, skipEmpty, bgColor, bgTolerance, targetFolder)
+            },
+            onDismiss = { showSplitDialog = false }
         )
     }
 }

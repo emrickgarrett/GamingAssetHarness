@@ -155,4 +155,47 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 - **Core**: 70 tests (models, config, workspace, file utils, retry logic)
 - **API Clients**: 24 tests (all 4 clients + rate limiter, using Ktor MockEngine)
 - **Agent**: 47 tests (agent lifecycle, bridge, system prompt, all tools)
-- **Total**: 141 tests, all passing
+- **CLI**: 26 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate commands)
+- **Total**: 167 tests, all passing
+
+## CLI Module (`:cli`)
+
+Command-line interface for generating assets without the GUI. Depends only on `:core` and `:api-clients` (no KOOG agent). Outputs structured JSON to stdout.
+
+### Running the CLI
+
+Requires JDK 21 with `JAVA_HOME` set. Use `-q` flag for clean JSON output.
+
+```bash
+# Check available generation capabilities
+./gradlew :cli:run --args="config" -q
+
+# List workspaces
+./gradlew :cli:run --args="workspace list" -q
+
+# Create a workspace
+./gradlew :cli:run --args="workspace create -n 'MyGame' -p '/path/to/workspace'" -q
+
+# Generate a sprite (fast, ~10s)
+./gradlew :cli:run --args="generate sprite -w 'MyGame' -d 'a red potion bottle' -s 16bit" -q
+
+# Generate a 3D model (slow, 5-10 min)
+./gradlew :cli:run --args="generate model -w 'MyGame' -d 'a wooden treasure chest' --art-style low-poly" -q
+
+# Generate music (slow, 1-3 min)
+./gradlew :cli:run --args="generate music -w 'MyGame' -d 'epic battle theme' --genre orchestral --mood epic" -q
+
+# Generate a sound effect (fast, ~5s)
+./gradlew :cli:run --args="generate sfx -w 'MyGame' -d 'coin pickup sound' --duration 1.0" -q
+
+# List assets
+./gradlew :cli:run --args="asset list -w 'MyGame' --type SPRITE" -q
+```
+
+### JSON Output Format
+
+All commands output `{"success": true/false, "command": "...", "data": {...}}` or `{"success": false, "command": "...", "error": {"code": "...", "message": "..."}}`.
+
+### Custom Command
+
+Use `/generate-asset` to invoke the asset generation workflow with instructions.

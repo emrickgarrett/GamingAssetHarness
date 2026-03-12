@@ -66,7 +66,7 @@ $JAVA_HOME/bin/java -version
 ./gradlew build
 ```
 
-This compiles all modules and runs the full test suite (141 tests).
+This compiles all modules and runs the full test suite (167 tests).
 
 ### 4. Run the application
 
@@ -168,6 +168,60 @@ When an asset is generated:
 - **Approve** to keep it in your workspace
 - **Deny** to reject it (optionally provide feedback so the agent can try again)
 
+## Claude Code Skill (CLI)
+
+GameDeveloperHarness includes a CLI module and a Claude Code skill that lets Claude generate game assets for you from **any project**. When you're building a game in a separate repo, just invoke `/generate-asset` and Claude will handle workspace setup, asset generation, and file delivery.
+
+### Installation
+
+**1. Set environment variables**
+
+Add these to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+
+```bash
+export JAVA_HOME="/path/to/jdk-21"
+export GAME_HARNESS_HOME="/path/to/GameDeveloperHarness"
+```
+
+**2. Build the CLI module**
+
+```bash
+cd "$GAME_HARNESS_HOME" && ./gradlew :cli:build
+```
+
+**3. Install the Claude Code skill**
+
+Copy the skill file to your global Claude Code commands directory:
+
+```bash
+mkdir -p ~/.claude/commands
+cp "$GAME_HARNESS_HOME/.claude/commands/generate-asset.md" ~/.claude/commands/generate-asset.md
+```
+
+Then update the copied file to use `$GAME_HARNESS_HOME` instead of relative paths. The repo includes a ready-to-use global version — see the command file for details.
+
+**4. Use it**
+
+From any Claude Code session, in any project:
+
+```
+/generate-asset create a 16-bit treasure chest sprite
+```
+
+Claude will check your configured API keys, find or create a workspace, generate the asset, and show you the result.
+
+### How It Works
+
+The CLI module (`:cli`) depends only on `:core` and `:api-clients` — no KOOG agent or GUI required. It accepts commands via `./gradlew :cli:run --args="..."` and outputs structured JSON to stdout.
+
+Available commands:
+- `config` — show which asset types are available based on configured API keys
+- `workspace list` / `workspace create` — manage workspaces
+- `generate sprite|model|music|sfx` — generate assets
+- `asset list` — list assets in a workspace
+
+All generated assets are auto-approved and saved to the workspace. If you don't like a result, tell Claude and it will regenerate with an adjusted description.
+
 ## Project Structure
 
 ```
@@ -176,6 +230,8 @@ GameDeveloperHarness/
   api-clients/        # HTTP clients for Gemini, Meshy, Suno, ElevenLabs
   agent/              # KOOG AI agent, tools, system prompt, UI bridge
   gui/                # Compose Desktop UI, themes, viewmodel
+  cli/                # CLI interface for Claude Code integration
+  .claude/commands/   # Claude Code skill definitions
   gradle/             # Version catalog (libs.versions.toml)
 ```
 
@@ -183,9 +239,10 @@ GameDeveloperHarness/
 
 ```
 :core  -->  :api-clients  -->  :agent  -->  :gui
+                          \-->  :cli
 ```
 
-Each module only depends on the one to its left, keeping concerns cleanly separated.
+The GUI and CLI modules are independent — both depend on `:core` and `:api-clients`, but neither depends on the other.
 
 ## Building Native Installers
 
@@ -230,13 +287,14 @@ your-workspace-folder/
 ### Running Tests
 
 ```bash
-# All tests
+# All tests (167 across all modules)
 ./gradlew test
 
 # Specific module
 ./gradlew :core:test
 ./gradlew :api-clients:test
 ./gradlew :agent:test
+./gradlew :cli:test
 ```
 
 ### Tech Stack

@@ -1,0 +1,17 @@
+<configuration>
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Suppress noisy libraries -->
+    <logger name="io.ktor" level="WARN"/>
+    <logger name="io.netty" level="WARN"/>
+
+    <!-- CLI logging goes to stderr so stdout stays clean JSON -->
+    <root level="WARN">
+        <appender-ref ref="STDERR"/>
+    </root>
+</configuration>
