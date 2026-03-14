@@ -36,10 +36,12 @@ List existing workspaces:
 ./gradlew :cli:run --args="workspace list" -q
 ```
 
-Create a workspace if needed (use an absolute path for the directory):
+Create a workspace if needed. **IMPORTANT: Always use an absolute path for `-p`** (e.g., `/home/user/my-game-workspace`, not `./workspaces/foo`). Relative paths cause files to resolve incorrectly when the CLI runs from its module subdirectory:
 ```bash
 ./gradlew :cli:run --args="workspace create -n '<name>' -p '<absolute-path>'" -q
 ```
+
+When choosing an existing workspace, check the `directoryPath` in the workspace list response. If it's a relative path (starts with `.`), prefer creating a new workspace with an absolute path instead, to avoid file resolution issues.
 
 ## Step 3: Generate the asset
 
