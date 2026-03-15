@@ -149,14 +149,15 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 - **Compose click handlers run on AWT EDT** - cannot use `SwingUtilities.invokeAndWait` from click handlers (use `isEventDispatchThread()` check)
 - **Workspace paths are absolute** and scattered across filesystem; the registry tracks them
 - **API clients are stateful** - must be closed when agent stops to avoid resource leaks
+- **Sprite transparent backgrounds use chroma key** - Gemini models struggle with true transparency, so sprites are generated with a solid chroma key background that is automatically removed via flood-fill + edge de-fringing. The chroma key color is auto-selected based on description (green by default, magenta for green-themed sprites, blue if both conflict). Use `--no-bg-removal` (CLI) or `transparentBackground=false` (agent tool) to skip this.
 
 ## Test Summary
 
-- **Core**: 70 tests (models, config, workspace, file utils, retry logic)
-- **API Clients**: 24 tests (all 4 clients + rate limiter, using Ktor MockEngine)
-- **Agent**: 47 tests (agent lifecycle, bridge, system prompt, all tools)
-- **CLI**: 26 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate commands)
-- **Total**: 167 tests, all passing
+- **Core**: 71 tests (models, config, workspace, file utils, retry logic, sprite sheet splitting, flood-fill bg removal, multi-pass defringe)
+- **API Clients**: 35 tests (all 4 clients + rate limiter, chroma key prompt/color selection, using Ktor MockEngine)
+- **Agent**: 50 tests (agent lifecycle, bridge, system prompt, all tools)
+- **CLI**: 28 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate commands)
+- **Total**: 270 tests, all passing
 
 ## CLI Module (`:cli`)
 
@@ -178,6 +179,12 @@ Requires JDK 21 with `JAVA_HOME` set. Use `-q` flag for clean JSON output.
 
 # Generate a sprite (fast, ~10s)
 ./gradlew :cli:run --args="generate sprite -w 'MyGame' -d 'a red potion bottle' -s 16bit" -q
+
+# Generate a sprite with image size and dimensions
+./gradlew :cli:run --args="generate sprite -w 'MyGame' -d 'a coin icon' -s 8bit --image-size 1K --width 32 --height 32" -q
+
+# Generate a sprite with opaque background (skip green screen removal)
+./gradlew :cli:run --args="generate sprite -w 'MyGame' -d 'a grass tile' -s 16bit --no-bg-removal" -q
 
 # Generate a 3D model (slow, 5-10 min)
 ./gradlew :cli:run --args="generate model -w 'MyGame' -d 'a wooden treasure chest' --art-style low-poly" -q

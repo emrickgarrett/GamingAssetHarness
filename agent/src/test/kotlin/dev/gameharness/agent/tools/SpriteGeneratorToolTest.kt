@@ -113,4 +113,59 @@ class SpriteGeneratorToolTest {
 
         assertTrue(result.contains("Failed to generate sprite"))
     }
+
+    @Test
+    fun `accepts valid imageSize arg`() {
+        val args = SpriteGeneratorTool.Args(
+            description = "a potion bottle",
+            style = "16bit",
+            imageSize = "2K"
+        )
+        assertEquals("2K", args.imageSize)
+    }
+
+    @Test
+    fun `rejects invalid imageSize`() {
+        assertFailsWith<IllegalArgumentException> {
+            SpriteGeneratorTool.Args(description = "a sword", style = "16bit", imageSize = "8K")
+        }
+    }
+
+    @Test
+    fun `rejects negative width`() {
+        assertFailsWith<IllegalArgumentException> {
+            SpriteGeneratorTool.Args(description = "a sword", style = "16bit", width = -10)
+        }
+    }
+
+    @Test
+    fun `accepts width and height dimensions`() {
+        val args = SpriteGeneratorTool.Args(
+            description = "a coin",
+            style = "8bit",
+            width = 32,
+            height = 32
+        )
+        assertEquals(32, args.width)
+        assertEquals(32, args.height)
+    }
+
+    @Test
+    fun `transparentBackground defaults to true`() {
+        val args = SpriteGeneratorTool.Args(
+            description = "a tree",
+            style = "16bit"
+        )
+        assertTrue(args.transparentBackground)
+    }
+
+    @Test
+    fun `transparentBackground can be set to false`() {
+        val args = SpriteGeneratorTool.Args(
+            description = "a background tile",
+            style = "16bit",
+            transparentBackground = false
+        )
+        assertFalse(args.transparentBackground)
+    }
 }

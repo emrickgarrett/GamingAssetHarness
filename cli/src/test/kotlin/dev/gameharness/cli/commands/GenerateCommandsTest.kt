@@ -151,6 +151,40 @@ class GenerateCommandsTest {
     }
 
     @Test
+    fun `generate sprite accepts image-size and dimension options`() {
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "generate", "sprite",
+                "-w", "NonExistent",
+                "-d", "a shield",
+                "--image-size", "2K",
+                "--width", "128",
+                "--height", "128"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("NOT_FOUND", parsed.error!!.code)
+    }
+
+    @Test
+    fun `generate sprite accepts no-bg-removal flag`() {
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "generate", "sprite",
+                "-w", "NonExistent",
+                "-d", "a background tile",
+                "--no-bg-removal"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("NOT_FOUND", parsed.error!!.code)
+    }
+
+    @Test
     fun `generate sfx fails when API key not configured`() {
         createWorkspace("SfxKeyTest")
 

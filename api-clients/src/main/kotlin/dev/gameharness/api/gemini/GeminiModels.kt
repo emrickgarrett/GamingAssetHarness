@@ -26,9 +26,17 @@ data class GeminiInlineData(
     val data: String
 )
 
+/** Image generation configuration for resolution and aspect ratio. */
+@Serializable
+data class GeminiImageConfig(
+    val imageSize: String? = null,
+    val aspectRatio: String? = null
+)
+
 @Serializable
 data class GeminiGenerationConfig(
-    val responseModalities: List<String>? = null
+    val responseModalities: List<String>? = null,
+    val imageConfig: GeminiImageConfig? = null
 )
 
 // Response models

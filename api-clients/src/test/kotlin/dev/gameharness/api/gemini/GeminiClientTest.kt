@@ -16,6 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class GeminiClientTest {
@@ -157,5 +158,186 @@ class GeminiClientTest {
 
         val url = assertNotNull(capturedUrl)
         assertTrue(url.contains("models/gemini-2.5-flash-image:generateContent"))
+    }
+
+    private val testJson = Json { ignoreUnknownKeys = true; encodeDefaults = true; isLenient = true }
+
+    @Test
+    fun `sends imageConfig with imageSize and aspectRatio`() = runTest {
+        var capturedBody: String? = null
+        val client = GeminiClient(
+            apiKey = "test-key",
+            httpClient = mockHttpClient { request ->
+                capturedBody = String(request.body.toByteArray())
+                respond(content = loadResource("gemini-success-response.json"), headers = jsonHeaders())
+            }
+        )
+
+        client.generate(GenerationRequest(
+            description = "a coin",
+            type = AssetType.SPRITE,
+            params = mapOf("style" to "16bit", "aspectRatio" to "16:9", "imageSize" to "1K")
+        ))
+
+        val body = assertNotNull(capturedBody)
+        val parsed = testJson.decodeFromString(GeminiRequest.serializer(), body)
+        val imageConfig = assertNotNull(parsed.generationConfig?.imageConfig)
+        assertEquals("1K", imageConfig.imageSize)
+        assertEquals("16:9", imageConfig.aspectRatio)
+    }
+
+    @Test
+    fun `includes dimension hints in prompt text`() = runTest {
+        var capturedBody: String? = null
+        val client = GeminiClient(
+            apiKey = "test-key",
+            httpClient = mockHttpClient { request ->
+                capturedBody = String(request.body.toByteArray())
+                respond(content = loadResource("gemini-success-response.json"), headers = jsonHeaders())
+            }
+        )
+
+        client.generate(GenerationRequest(
+            description = "a tile",
+            type = AssetType.SPRITE,
+            params = mapOf("style" to "16bit", "width" to "64", "height" to "64")
+        ))
+
+        val body = assertNotNull(capturedBody)
+        val parsed = testJson.decodeFromString(GeminiRequest.serializer(), body)
+        val textPart = parsed.contents.first().parts.find { it.text != null }
+        assertNotNull(textPart)
+        assertTrue(textPart.text!!.contains("64x64 pixels"))
+    }
+
+    @Test
+    fun `prompt requests green background by default`() = runTest {
+        var capturedBody: String? = null
+        val client = GeminiClient(
+            apiKey = "test-key",
+            httpClient = mockHttpClient { request ->
+                capturedBody = String(request.body.toByteArray())
+                respond(content = loadResource("gemini-success-response.json"), headers = jsonHeaders())
+            }
+        )
+
+        client.generate(GenerationRequest(
+            description = "a shield",
+            type = AssetType.SPRITE,
+            params = mapOf("style" to "16bit")
+        ))
+
+        val body = assertNotNull(capturedBody)
+        val parsed = testJson.decodeFromString(GeminiRequest.serializer(), body)
+        val textPart = parsed.contents.first().parts.find { it.text != null }
+        assertNotNull(textPart)
+        assertTrue(textPart.text!!.contains("#00b140"), "Prompt should request green background")
+        assertTrue(textPart.text!!.contains("green"), "Prompt should mention green background")
+        assertTrue(textPart.text!!.contains("chroma key"), "Prompt should mention chroma key concept")
+    }
+
+    @Test
+    fun `prompt requests transparent background when removeBg is false`() = runTest {
+        var capturedBody: String? = null
+        val client = GeminiClient(
+            apiKey = "test-key",
+            httpClient = mockHttpClient { request ->
+                capturedBody = String(request.body.toByteArray())
+                respond(content = loadResource("gemini-success-response.json"), headers = jsonHeaders())
+            }
+        )
+
+        client.generate(GenerationRequest(
+            description = "a potion",
+            type = AssetType.SPRITE,
+            params = mapOf("style" to "16bit", "removeBg" to "false")
+        ))
+
+        val body = assertNotNull(capturedBody)
+        val parsed = testJson.decodeFromString(GeminiRequest.serializer(), body)
+        val textPart = parsed.contents.first().parts.find { it.text != null }
+        assertNotNull(textPart)
+        assertTrue(textPart.text!!.contains("Transparent background"), "Prompt should request transparent background")
+    }
+
+    @Test
+    fun `builds imageConfig with only aspectRatio when no imageSize`() = runTest {
+        var capturedBody: String? = null
+        val client = GeminiClient(
+            apiKey = "test-key",
+            httpClient = mockHttpClient { request ->
+                capturedBody = String(request.body.toByteArray())
+                respond(content = loadResource("gemini-success-response.json"), headers = jsonHeaders())
+            }
+        )
+
+        client.generate(GenerationRequest(
+            description = "a sword",
+            type = AssetType.SPRITE,
+            params = mapOf("style" to "16bit", "aspectRatio" to "3:2")
+        ))
+
+        val body = assertNotNull(capturedBody)
+        val parsed = testJson.decodeFromString(GeminiRequest.serializer(), body)
+        val imageConfig = assertNotNull(parsed.generationConfig?.imageConfig)
+        assertEquals("3:2", imageConfig.aspectRatio)
+        assertNull(imageConfig.imageSize)
+    }
+
+    // -- selectChromaKeyColor() -----------------------------------------------
+
+    @Test
+    fun `selectChromaKeyColor returns green for neutral description`() {
+        val result = GeminiClient.selectChromaKeyColor("a medieval sword")
+        assertEquals(GeminiClient.CHROMA_GREEN, result)
+    }
+
+    @Test
+    fun `selectChromaKeyColor returns magenta for green-related description`() {
+        val result = GeminiClient.selectChromaKeyColor("a green slime monster")
+        assertEquals(GeminiClient.CHROMA_MAGENTA, result)
+    }
+
+    @Test
+    fun `selectChromaKeyColor returns magenta for nature keywords`() {
+        val result = GeminiClient.selectChromaKeyColor("a tall oak tree in a forest")
+        assertEquals(GeminiClient.CHROMA_MAGENTA, result)
+    }
+
+    @Test
+    fun `selectChromaKeyColor returns blue when both green and magenta conflict`() {
+        val result = GeminiClient.selectChromaKeyColor("a purple dragon in a green forest")
+        assertEquals(GeminiClient.CHROMA_BLUE, result)
+    }
+
+    @Test
+    fun `selectChromaKeyColor is case insensitive`() {
+        val result = GeminiClient.selectChromaKeyColor("A GREEN SLIME MONSTER")
+        assertEquals(GeminiClient.CHROMA_MAGENTA, result)
+    }
+
+    @Test
+    fun `prompt uses magenta for green-themed sprite description`() = runTest {
+        var capturedBody: String? = null
+        val client = GeminiClient(
+            apiKey = "test-key",
+            httpClient = mockHttpClient { request ->
+                capturedBody = String(request.body.toByteArray())
+                respond(content = loadResource("gemini-success-response.json"), headers = jsonHeaders())
+            }
+        )
+
+        client.generate(GenerationRequest(
+            description = "a green slime monster",
+            type = AssetType.SPRITE,
+            params = mapOf("style" to "16bit")
+        ))
+
+        val body = assertNotNull(capturedBody)
+        val parsed = testJson.decodeFromString(GeminiRequest.serializer(), body)
+        val textPart = parsed.contents.first().parts.find { it.text != null }
+        assertNotNull(textPart)
+        assertTrue(textPart.text!!.contains("#ff00ff"), "Prompt should use magenta for green sprite")
+        assertTrue(textPart.text!!.contains("magenta"), "Prompt should mention magenta background")
     }
 }

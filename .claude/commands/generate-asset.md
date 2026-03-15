@@ -52,7 +52,16 @@ Based on the user's request, determine the asset type and run the appropriate co
 ./gradlew :cli:run --args="generate sprite -w '<workspace-name>' -d '<detailed description>' -s '<style>'" -q
 ```
 - Styles: `8bit`, `16bit` (default), `modern`, `realistic`
-- Aspect ratios (--aspect-ratio): `1:1` (default), `2:3`, `3:2`, `4:3`, `16:9`
+- Aspect ratios (--aspect-ratio): `1:1` (default), `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`
+- Image size presets (--image-size): `512`, `1K`, `2K`, `4K` (optional, controls resolution tier)
+- Dimension hints (--width, --height): pixel values like `32`, `64`, `128`, `256` (hints in prompt, not exact)
+- Background removal (automatic by default):
+  - Sprites are generated with a chroma key colored background, then the background is automatically removed to produce clean transparency
+  - The chroma key color is auto-selected based on the description: **green** (#00b140) by default, **magenta** (#ff00ff) for green-themed sprites (trees, slimes, grass, etc.), **blue** (#0000ff) if both green and purple/pink conflict
+  - Removal pipeline: BFS flood-fill from image borders (tolerance 60) → 2 passes of edge de-fringing (tolerance 120) to clean anti-aliased edges
+  - Output is always PNG (to preserve alpha channel)
+  - Add `--no-bg-removal` to skip this entirely and keep the opaque background (useful for tiles, backgrounds, or when transparency isn't needed)
+  - If the generated sprite has unwanted fringe artifacts, try regenerating — results vary per generation
 - Reference images: add `-r '<path>'` (can repeat for multiple)
 - Folder: add `-f '<folder>'` to organize into a subfolder
 
@@ -88,5 +97,19 @@ Parse the JSON response. On success, `data.filePath` has the absolute path to th
 ./gradlew :cli:run --args="asset list -w '<workspace-name>'" -q
 ```
 Filter options: `--type SPRITE|MODEL_3D|MUSIC|SOUND_EFFECT`, `--status PENDING|APPROVED|DENIED`
+
+## Tips for Best Results
+
+### Sprite descriptions
+- Be specific about the subject — "a medieval iron sword with a leather-wrapped hilt" works better than "a sword"
+- Include art style context in the description too — "pixel art style fire elemental" helps the model
+- For characters, specify pose: "idle stance facing right", "walking animation frame 1"
+
+### Transparent background tips
+- The default chroma key pipeline works well for most sprites (characters, items, UI elements)
+- Use `--no-bg-removal` for **tiles**, **backgrounds**, **terrain**, or anything where you need the full image without transparency
+- The system auto-detects green-themed sprites (trees, slimes, etc.) and switches to magenta chroma key to avoid conflicts
+- If you see residual fringe on a generated sprite, regenerate — quality varies per generation
+- For **tilesets or sprite sheets**, generate individual sprites separately; the background removal is designed for single-subject images
 
 $ARGUMENTS

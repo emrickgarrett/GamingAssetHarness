@@ -265,4 +265,265 @@ class SpriteSheetSplitterTest {
         // Right pixel should remain opaque red
         assertEquals(Color.RED.rgb, result.getRGB(1, 0), "Red pixel should be unchanged")
     }
+
+    // -- removeBackgroundFloodFill() ------------------------------------------
+
+    @Test
+    fun `removeBackgroundFloodFill makes border-connected bg pixels transparent`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val img = createTestImage(4, 4, green)
+        val result = SpriteSheetSplitter.removeBackgroundFloodFill(img, green, tolerance = 0)
+        assertTrue(SpriteSheetSplitter.isFullyTransparent(result))
+    }
+
+    @Test
+    fun `removeBackgroundFloodFill preserves interior non-bg pixels`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val img = createTestImage(5, 5, green)
+        img.setRGB(2, 2, Color.RED.rgb)
+
+        val result = SpriteSheetSplitter.removeBackgroundFloodFill(img, green, tolerance = 0)
+
+        // Center pixel should remain opaque red
+        assertEquals(Color.RED.rgb, result.getRGB(2, 2))
+        // Border pixels should be transparent
+        assertEquals(0, (result.getRGB(0, 0) ushr 24) and 0xFF)
+    }
+
+    @Test
+    fun `removeBackgroundFloodFill does not remove interior green behind sprite wall`() {
+        // 5x5 image: green border, red wall at (1,1)-(3,3), green center at (2,2)
+        // The center green pixel is NOT connected to the border through green
+        val green = Color(0x00, 0xB1, 0x40)
+        val img = createTestImage(5, 5, green)
+        // Paint a red wall around the center
+        for (x in 1..3) {
+            for (y in 1..3) {
+                img.setRGB(x, y, Color.RED.rgb)
+            }
+        }
+        // Put green back in the very center
+        img.setRGB(2, 2, green.rgb)
+
+        val result = SpriteSheetSplitter.removeBackgroundFloodFill(img, green, tolerance = 0)
+
+        // Border green should be removed
+        assertEquals(0, (result.getRGB(0, 0) ushr 24) and 0xFF, "Border green should be removed")
+        // Interior green at (2,2) should remain (not connected to border)
+        val centerAlpha = (result.getRGB(2, 2) ushr 24) and 0xFF
+        assertEquals(255, centerAlpha, "Interior green should be preserved")
+        // Red wall should remain
+        assertEquals(Color.RED.rgb, result.getRGB(1, 1))
+    }
+
+    @Test
+    fun `removeBackgroundFloodFill respects tolerance for noisy backgrounds`() {
+        val exactGreen = Color(0x00, 0xB1, 0x40)
+        val noisyGreen = Color(0x10, 0xA0, 0x50) // Manhattan distance = 16+17+16 = 49
+        val img = BufferedImage(3, 3, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 3) for (x in 0 until 3) img.setRGB(x, y, noisyGreen.rgb)
+        img.setRGB(1, 1, Color.RED.rgb)
+
+        // Tolerance 30 should NOT match noisy green (distance=49)
+        val strict = SpriteSheetSplitter.removeBackgroundFloodFill(img, exactGreen, tolerance = 30)
+        val strictCornerAlpha = (strict.getRGB(0, 0) ushr 24) and 0xFF
+        assertEquals(255, strictCornerAlpha, "Low tolerance should not match noisy green")
+
+        // Tolerance 60 SHOULD match noisy green (distance=49 <= 60)
+        val relaxed = SpriteSheetSplitter.removeBackgroundFloodFill(img, exactGreen, tolerance = 60)
+        val relaxedCornerAlpha = (relaxed.getRGB(0, 0) ushr 24) and 0xFF
+        assertEquals(0, relaxedCornerAlpha, "High tolerance should match noisy green")
+        // Red center should still remain
+        assertEquals(Color.RED.rgb, relaxed.getRGB(1, 1))
+    }
+
+    @Test
+    fun `removeBackgroundFloodFill does not modify original image`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val img = createTestImage(4, 4, green)
+        val originalRgb = img.getRGB(0, 0)
+
+        SpriteSheetSplitter.removeBackgroundFloodFill(img, green, tolerance = 0)
+
+        assertEquals(originalRgb, img.getRGB(0, 0), "Original should not be modified")
+    }
+
+    @Test
+    fun `removeBackgroundFloodFill handles image with no background pixels`() {
+        val img = createTestImage(4, 4, Color.RED)
+        val result = SpriteSheetSplitter.removeBackgroundFloodFill(
+            img, Color(0x00, 0xB1, 0x40), tolerance = 0
+        )
+        for (y in 0 until 4) {
+            for (x in 0 until 4) {
+                assertEquals(Color.RED.rgb, result.getRGB(x, y))
+            }
+        }
+    }
+
+    @Test
+    fun `removeBackgroundFloodFill handles 1x1 image`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val img = createTestImage(1, 1, green)
+        val result = SpriteSheetSplitter.removeBackgroundFloodFill(img, green, tolerance = 0)
+        assertTrue(SpriteSheetSplitter.isFullyTransparent(result))
+    }
+
+    @Test
+    fun `removeBackgroundFloodFill treats transparent pixels as connectable background`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val img = BufferedImage(3, 3, BufferedImage.TYPE_INT_ARGB)
+        // Top row: transparent
+        for (x in 0 until 3) img.setRGB(x, 0, 0x00000000)
+        // Middle row: green, red, green
+        img.setRGB(0, 1, green.rgb)
+        img.setRGB(1, 1, Color.RED.rgb)
+        img.setRGB(2, 1, green.rgb)
+        // Bottom row: green
+        for (x in 0 until 3) img.setRGB(x, 2, green.rgb)
+
+        val result = SpriteSheetSplitter.removeBackgroundFloodFill(img, green, tolerance = 0)
+
+        // Green pixels connected to border via transparent should be removed
+        assertEquals(0, (result.getRGB(0, 1) ushr 24) and 0xFF, "Left green connected to border via transparent")
+        assertEquals(0, (result.getRGB(2, 1) ushr 24) and 0xFF, "Right green connected to border via transparent")
+        // Red center should remain
+        assertEquals(Color.RED.rgb, result.getRGB(1, 1), "Red center should be preserved")
+    }
+
+    // -- defringeEdges() ------------------------------------------------------
+
+    @Test
+    fun `defringeEdges removes edge pixels within tolerance of bg color`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        // 5x5 transparent image with a 3x3 near-green block in the center
+        val nearGreen = Color(0x20, 0xA0, 0x50) // Manhattan distance = 32+17+16 = 65
+        val img = BufferedImage(5, 5, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 5) for (x in 0 until 5) img.setRGB(x, y, 0x00000000)
+        for (y in 1..3) for (x in 1..3) img.setRGB(x, y, nearGreen.rgb)
+        // Set center to red (non-green)
+        img.setRGB(2, 2, Color.RED.rgb)
+
+        val result = SpriteSheetSplitter.defringeEdges(img, green, tolerance = 120)
+
+        // The 8 edge pixels of the 3x3 block should be removed (distance 65 <= 120)
+        assertEquals(0, (result.getRGB(1, 1) ushr 24) and 0xFF, "Edge near-green should be removed")
+        assertEquals(0, (result.getRGB(2, 1) ushr 24) and 0xFF, "Top edge should be removed")
+        assertEquals(0, (result.getRGB(3, 1) ushr 24) and 0xFF, "Edge near-green should be removed")
+        // Red center is not adjacent to transparent in original, so it stays
+        assertEquals(Color.RED.rgb, result.getRGB(2, 2), "Red center should remain")
+    }
+
+    @Test
+    fun `defringeEdges preserves edge pixels outside tolerance`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        // 5x5 transparent image with a 3x3 red block in the center
+        val img = BufferedImage(5, 5, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 5) for (x in 0 until 5) img.setRGB(x, y, 0x00000000)
+        for (y in 1..3) for (x in 1..3) img.setRGB(x, y, Color.RED.rgb)
+
+        val result = SpriteSheetSplitter.defringeEdges(img, green, tolerance = 120)
+
+        // Red has distance ~496 from green — all 9 pixels should survive
+        for (y in 1..3) {
+            for (x in 1..3) {
+                assertEquals(Color.RED.rgb, result.getRGB(x, y), "Red pixels should be preserved")
+            }
+        }
+    }
+
+    @Test
+    fun `defringeEdges does not remove interior pixels even if they match bg color`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        // 7x7 transparent image with a 5x5 near-green block
+        val nearGreen = Color(0x10, 0xA5, 0x45) // Close to green
+        val img = BufferedImage(7, 7, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 7) for (x in 0 until 7) img.setRGB(x, y, 0x00000000)
+        for (y in 1..5) for (x in 1..5) img.setRGB(x, y, nearGreen.rgb)
+
+        val result = SpriteSheetSplitter.defringeEdges(img, green, tolerance = 120)
+
+        // Outer ring (edge pixels) of the 5x5 block should be removed
+        assertEquals(0, (result.getRGB(1, 1) ushr 24) and 0xFF, "Outer ring should be removed")
+        // Inner 3x3 should remain — they are NOT adjacent to transparent in the input
+        val innerAlpha = (result.getRGB(3, 3) ushr 24) and 0xFF
+        assertEquals(255, innerAlpha, "Interior pixels should be preserved")
+    }
+
+    @Test
+    fun `defringeEdges does not cascade beyond one layer`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        // 7x7 transparent image with 5x5 near-green block
+        val nearGreen = Color(0x10, 0xA5, 0x45)
+        val img = BufferedImage(7, 7, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 7) for (x in 0 until 7) img.setRGB(x, y, 0x00000000)
+        for (y in 1..5) for (x in 1..5) img.setRGB(x, y, nearGreen.rgb)
+
+        val result = SpriteSheetSplitter.defringeEdges(img, green, tolerance = 120)
+
+        // Only the outer ring (16 pixels) should be removed
+        // The second ring (pixels at distance 2 from border like (2,2)) should remain
+        val secondRingAlpha = (result.getRGB(2, 2) ushr 24) and 0xFF
+        assertEquals(255, secondRingAlpha, "Second ring should NOT be removed (no cascading)")
+    }
+
+    @Test
+    fun `defringeEdges handles fully transparent image`() {
+        val img = BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 4) for (x in 0 until 4) img.setRGB(x, y, 0x00000000)
+
+        val result = SpriteSheetSplitter.defringeEdges(img, Color(0x00, 0xB1, 0x40), tolerance = 120)
+        assertTrue(SpriteSheetSplitter.isFullyTransparent(result))
+    }
+
+    @Test
+    fun `defringeEdges does not modify original image`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val img = BufferedImage(5, 5, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 5) for (x in 0 until 5) img.setRGB(x, y, 0x00000000)
+        for (y in 1..3) for (x in 1..3) img.setRGB(x, y, green.rgb)
+        val originalRgb = img.getRGB(2, 2)
+
+        SpriteSheetSplitter.defringeEdges(img, green, tolerance = 120)
+
+        assertEquals(originalRgb, img.getRGB(2, 2), "Original should not be modified")
+    }
+
+    @Test
+    fun `defringeEdges two passes removes two pixel layers of fringe`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        // 9x9 transparent image with 7x7 near-green block in center (rows/cols 1-7)
+        val nearGreen = Color(0x10, 0xA5, 0x45)
+        val img = BufferedImage(9, 9, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 9) for (x in 0 until 9) img.setRGB(x, y, 0x00000000)
+        for (y in 1..7) for (x in 1..7) img.setRGB(x, y, nearGreen.rgb)
+
+        // Single pass: removes outer ring (layer 1), inner 5x5 (rows/cols 2-6) remains
+        val pass1 = SpriteSheetSplitter.defringeEdges(img, green, tolerance = 120)
+        val pass1Layer1Alpha = (pass1.getRGB(1, 1) ushr 24) and 0xFF
+        assertEquals(0, pass1Layer1Alpha, "First pass should remove layer 1")
+        val pass1Layer2Alpha = (pass1.getRGB(2, 2) ushr 24) and 0xFF
+        assertEquals(255, pass1Layer2Alpha, "First pass should NOT remove layer 2")
+
+        // Second pass: removes next ring (layer 2), inner 3x3 (rows/cols 3-5) remains
+        val pass2 = SpriteSheetSplitter.defringeEdges(pass1, green, tolerance = 120)
+        val pass2Layer2Alpha = (pass2.getRGB(2, 2) ushr 24) and 0xFF
+        assertEquals(0, pass2Layer2Alpha, "Second pass should remove layer 2")
+        val pass2Layer3Alpha = (pass2.getRGB(3, 3) ushr 24) and 0xFF
+        assertEquals(255, pass2Layer3Alpha, "Second pass should NOT remove layer 3")
+    }
+
+    @Test
+    fun `defringeEdges works with magenta chroma key`() {
+        val magenta = Color(0xFF, 0x00, 0xFF)
+        val nearMagenta = Color(0xE0, 0x20, 0xE0) // Manhattan distance = 31+32+31 = 94
+        val img = BufferedImage(5, 5, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 5) for (x in 0 until 5) img.setRGB(x, y, 0x00000000)
+        for (y in 1..3) for (x in 1..3) img.setRGB(x, y, nearMagenta.rgb)
+
+        val result = SpriteSheetSplitter.defringeEdges(img, magenta, tolerance = 120)
+
+        // Edge near-magenta pixels should be removed (distance 94 <= 120)
+        assertEquals(0, (result.getRGB(1, 1) ushr 24) and 0xFF, "Near-magenta edge should be removed")
+    }
 }

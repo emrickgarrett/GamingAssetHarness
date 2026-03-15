@@ -36,24 +36,45 @@ class SpriteGeneratorTool(
         val description: String,
         @property:LLMDescription("Art style: '8bit', '16bit', 'modern', or 'realistic'. Default: '16bit'")
         val style: String = "16bit",
-        @property:LLMDescription("Aspect ratio: '1:1', '2:3', '3:2', '4:3', '16:9'. Default: '1:1'")
+        @property:LLMDescription("Aspect ratio: '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'. Default: '1:1'")
         val aspectRatio: String = "1:1",
+        @property:LLMDescription("Image size preset: '512', '1K', '2K', '4K'. Controls resolution tier. Optional, omit for API default.")
+        val imageSize: String? = null,
+        @property:LLMDescription("Desired width in pixels (e.g. 32, 64, 128, 256). Used as a hint in the prompt. Optional.")
+        val width: Int? = null,
+        @property:LLMDescription("Desired height in pixels (e.g. 32, 64, 128, 256). Used as a hint in the prompt. Optional.")
+        val height: Int? = null,
+        @property:LLMDescription("Whether to auto-remove the background for transparency. Default: true. Set false if the user explicitly wants an opaque/colored background.")
+        val transparentBackground: Boolean = true,
         @property:LLMDescription("Set to true if the user attached reference image(s) to use as visual guide. Default: false")
         val useReferenceImages: Boolean = false
     ) {
         init {
             require(description.isNotBlank()) { "Description must not be blank" }
             require(style in VALID_STYLES) { "Style must be one of: ${VALID_STYLES.joinToString()}" }
+            if (imageSize != null) {
+                require(imageSize in VALID_IMAGE_SIZES) { "Image size must be one of: ${VALID_IMAGE_SIZES.joinToString()}" }
+            }
+            if (width != null) require(width > 0) { "Width must be positive" }
+            if (height != null) require(height > 0) { "Height must be positive" }
         }
     }
 
     /** Generates a sprite, saves it to the workspace, and returns a status string for the LLM. */
     override suspend fun execute(args: Args): String {
         val referenceImagePaths = if (args.useReferenceImages) bridge.latestAttachmentPaths else emptyList()
+        val params = buildMap {
+            put("style", args.style)
+            put("aspectRatio", args.aspectRatio)
+            if (args.imageSize != null) put("imageSize", args.imageSize)
+            if (args.width != null) put("width", args.width.toString())
+            if (args.height != null) put("height", args.height.toString())
+            if (!args.transparentBackground) put("removeBg", "false")
+        }
         val request = GenerationRequest(
             description = args.description,
             type = AssetType.SPRITE,
-            params = mapOf("style" to args.style, "aspectRatio" to args.aspectRatio),
+            params = params,
             referenceImagePaths = referenceImagePaths
         )
 
@@ -82,5 +103,7 @@ class SpriteGeneratorTool(
     companion object {
         /** Accepted values for the [Args.style] parameter. */
         val VALID_STYLES = setOf("8bit", "16bit", "modern", "realistic")
+        /** Accepted values for the [Args.imageSize] parameter. */
+        val VALID_IMAGE_SIZES = setOf("512", "1K", "2K", "4K")
     }
 }

@@ -26,6 +26,7 @@ The agent adapts to your setup — only the services you configure will be avail
 - **Chat-based workflow** — describe assets in natural language, review and approve/deny results
 - **IDE-style workspaces** — create workspaces in any folder on your filesystem; all generated assets are saved there
 - **Workspace instructions** — set persistent per-workspace context (art style, format preferences, project guidelines) that the AI follows across all sessions
+- **Automatic transparent backgrounds** — sprites are generated with a chroma key background that is automatically removed via flood-fill and multi-pass edge de-fringing to produce clean transparency. The chroma key color is intelligently selected based on sprite content (green by default, magenta for nature/green sprites, blue when both conflict)
 - **NanoBanana model selection** — choose between Nano Banana, Nano Banana 2, or Nano Banana Pro for 2D generation
 - **Multi-service integration** — generate 2D, 3D, music, and audio from a single interface
 - **Progress tracking** — real-time progress for long-running generations (3D models, music)
@@ -66,7 +67,7 @@ $JAVA_HOME/bin/java -version
 ./gradlew build
 ```
 
-This compiles all modules and runs the full test suite (167 tests).
+This compiles all modules and runs the full test suite (270 tests).
 
 ### 4. Run the application
 
@@ -287,7 +288,7 @@ your-workspace-folder/
 ### Running Tests
 
 ```bash
-# All tests (167 across all modules)
+# All tests (270 across all modules)
 ./gradlew test
 
 # Specific module
