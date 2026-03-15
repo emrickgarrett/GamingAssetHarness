@@ -32,7 +32,8 @@ The agent adapts to your setup — only the services you configure will be avail
 - **Progress tracking** — real-time progress for long-running generations (3D models, music)
 - **Asset management** — approve, deny (with feedback), or delete generated assets
 - **Light & dark themes** — Material 3 theming with persistent preference
-- **Keyboard shortcuts** — `Ctrl+,` for settings, `Ctrl+Shift+N` for new workspace
+- **Open existing folders** — use any existing project directory as a workspace; existing assets in `assets/` subdirectories are auto-discovered
+- **Keyboard shortcuts** — `Ctrl+,` for settings, `Ctrl+Shift+N` for new workspace, `Ctrl+Shift+O` to open existing folder
 - **Cross-platform** — runs on Windows, macOS, and Linux
 
 ## Prerequisites
@@ -67,7 +68,7 @@ $JAVA_HOME/bin/java -version
 ./gradlew build
 ```
 
-This compiles all modules and runs the full test suite (275 tests).
+This compiles all modules and runs the full test suite (294 tests).
 
 ### 4. Run the application
 
@@ -133,6 +134,14 @@ All three models use the same Gemini API key. The model selection is saved per-u
 4. Click **Create**
 
 All generated assets will be saved in your chosen folder under an `assets/` subdirectory, organized by type (`sprites/`, `models/`, `music/`, `sfx/`).
+
+### Opening an Existing Folder
+
+Already have a game project? Click **Open** in the workspace dropdown (or press `Ctrl+Shift+O`) to use any existing directory as a workspace. The app will:
+
+- Initialize workspace metadata alongside your existing files (nothing is moved or deleted)
+- Auto-discover any assets already present in `assets/sprites/`, `assets/models/`, `assets/music/`, or `assets/sfx/`
+- If the folder already contains a `workspace.json` from a previous session, it will be imported automatically
 
 ### Workspace Instructions
 
@@ -217,12 +226,13 @@ The CLI module (`:cli`) depends only on `:core` and `:api-clients` — no KOOG a
 
 Available commands:
 - `config` — show which asset types are available based on configured API keys
-- `workspace list` / `workspace create` — manage workspaces
+- `workspace list` / `workspace create` / `workspace open` — manage workspaces
 - `generate sprite|model|music|sfx` — generate assets
 - `asset list` — list assets in a workspace
 - `asset revise` — revise an existing sprite using it as a reference image
+- `asset trim` — trim transparent borders from a sprite to reduce file size
 
-All generated assets are auto-approved and saved to the workspace. If you don't like a result, use `asset revise` to iterate on sprites with the original as a visual reference, or tell Claude to regenerate with an adjusted description.
+All generated assets are auto-approved and saved to the workspace. If you don't like a result, use `asset revise` to iterate on sprites with the original as a visual reference, or tell Claude to regenerate with an adjusted description. Use `asset trim` to crop transparent borders from sprites after background removal.
 
 ## Project Structure
 
@@ -289,7 +299,7 @@ your-workspace-folder/
 ### Running Tests
 
 ```bash
-# All tests (275 across all modules)
+# All tests (294 across all modules)
 ./gradlew test
 
 # Specific module

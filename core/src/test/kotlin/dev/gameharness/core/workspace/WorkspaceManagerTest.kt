@@ -332,6 +332,43 @@ class WorkspaceManagerTest {
         assertEquals("characters", updated.assets.first().folder)
     }
 
+    // ── replaceAssetFile() ──────────────────────────────────────────────
+
+    @Test
+    fun `replaceAssetFile overwrites file and updates sizeBytes`() {
+        val workspace = manager.createWorkspace("ReplaceTest", workspacesDir.resolve("replace-test"))
+        val asset = GeneratedAsset(
+            id = "replace-001",
+            type = AssetType.SPRITE,
+            fileName = "sword.png",
+            filePath = "",
+            format = "png",
+            description = "A sword"
+        )
+        val originalBytes = byteArrayOf(1, 2, 3, 4, 5)
+        val (savedPath, wsWithAsset) = manager.saveAsset(workspace, asset, originalBytes)
+        assertEquals(5L, wsWithAsset.assets.first().sizeBytes)
+
+        val newBytes = byteArrayOf(10, 20, 30)
+        val updated = manager.replaceAssetFile(wsWithAsset, "replace-001", newBytes)
+
+        // File should contain new bytes
+        val onDisk = Files.readAllBytes(savedPath)
+        assertContentEquals(newBytes, onDisk)
+
+        // sizeBytes should be updated
+        assertEquals(3L, updated.assets.first().sizeBytes)
+    }
+
+    @Test
+    fun `replaceAssetFile returns unchanged workspace for unknown asset`() {
+        val workspace = manager.createWorkspace("ReplaceUnknownTest", workspacesDir.resolve("replace-unknown"))
+
+        val result = manager.replaceAssetFile(workspace, "nonexistent-id", byteArrayOf(1, 2, 3))
+
+        assertSame(workspace, result, "Should return same instance for unknown asset ID")
+    }
+
     // ── syncAssets() ──────────────────────────────────────────────────────
 
     @Test
@@ -773,5 +810,102 @@ class WorkspaceManagerTest {
         assertTrue(migratedAsset.filePath.replace("\\", "/").contains("assets/sprites/heroes/knight.png"))
         assertTrue(Path.of(migratedAsset.filePath).toFile().exists(), "Migrated file should exist at new location")
         assertFalse(flatPath.toFile().exists(), "Original flat file should be moved")
+    }
+
+    // ── openWorkspace() ──────────────────────────────────────────────────
+
+    @Test
+    fun `openWorkspace initializes workspace in non-empty directory`() {
+        val wsDir = workspacesDir.resolve("existing-project")
+        Files.createDirectories(wsDir)
+        Files.writeString(wsDir.resolve("README.md"), "My game project")
+        Files.writeString(wsDir.resolve("notes.txt"), "Design notes")
+
+        val workspace = manager.openWorkspace("My Game", wsDir)
+
+        assertEquals("My Game", workspace.name)
+        assertEquals(wsDir.toAbsolutePath().toString(), workspace.directoryPath)
+        // workspace.json should now exist
+        assertTrue(wsDir.resolve("workspace.json").toFile().exists())
+        // Asset subdirectories should be created
+        AssetType.entries.forEach { type ->
+            assertTrue(wsDir.resolve("assets").resolve(type.subdirectory).toFile().isDirectory)
+        }
+        // Original files should be untouched
+        assertTrue(wsDir.resolve("README.md").toFile().exists())
+        assertTrue(wsDir.resolve("notes.txt").toFile().exists())
+        // Should be in the registry
+        assertEquals(1, manager.listWorkspaces().size)
+    }
+
+    @Test
+    fun `openWorkspace imports existing workspace json`() {
+        val wsDir = workspacesDir.resolve("has-metadata")
+        Files.createDirectories(wsDir)
+        val workspaceJson = """{"name":"Existing Project","directoryPath":"${
+            wsDir.toAbsolutePath().toString().replace("\\", "\\\\")
+        }","createdAt":1000,"assets":[]}"""
+        Files.writeString(wsDir.resolve("workspace.json"), workspaceJson)
+
+        val workspace = manager.openWorkspace("Ignored Name", wsDir)
+
+        // Name from workspace.json takes precedence
+        assertEquals("Existing Project", workspace.name)
+        assertEquals(1, manager.listWorkspaces().size)
+    }
+
+    @Test
+    fun `openWorkspace discovers existing assets in asset directories`() {
+        val wsDir = workspacesDir.resolve("with-assets")
+        Files.createDirectories(wsDir.resolve("assets/sprites"))
+        Files.createDirectories(wsDir.resolve("assets/music"))
+        Files.write(wsDir.resolve("assets/sprites/hero.png"), byteArrayOf(1, 2, 3))
+        Files.write(wsDir.resolve("assets/music/theme.mp3"), byteArrayOf(4, 5, 6))
+
+        val workspace = manager.openWorkspace("Asset Project", wsDir)
+
+        assertEquals(2, workspace.assets.size)
+        val fileNames = workspace.assets.map { it.fileName }.toSet()
+        assertTrue("hero.png" in fileNames)
+        assertTrue("theme.mp3" in fileNames)
+    }
+
+    @Test
+    fun `openWorkspace discovers assets in subdirectories with folder metadata`() {
+        val wsDir = workspacesDir.resolve("with-folders")
+        Files.createDirectories(wsDir.resolve("assets/sprites/characters"))
+        Files.write(wsDir.resolve("assets/sprites/characters/warrior.png"), byteArrayOf(1, 2, 3))
+
+        val workspace = manager.openWorkspace("Folder Project", wsDir)
+
+        assertEquals(1, workspace.assets.size)
+        assertEquals("characters", workspace.assets.first().folder)
+        assertTrue("characters" in workspace.folders)
+    }
+
+    @Test
+    fun `openWorkspace rejects non-existent directory`() {
+        val wsDir = workspacesDir.resolve("does-not-exist")
+        assertFailsWith<IllegalArgumentException> {
+            manager.openWorkspace("Test", wsDir)
+        }
+    }
+
+    @Test
+    fun `openWorkspace rejects blank name`() {
+        val wsDir = workspacesDir.resolve("blank-name")
+        Files.createDirectories(wsDir)
+        assertFailsWith<IllegalArgumentException> {
+            manager.openWorkspace("", wsDir)
+        }
+    }
+
+    @Test
+    fun `openWorkspace rejects file path not directory`() {
+        val filePath = workspacesDir.resolve("a-file.txt")
+        Files.writeString(filePath, "not a directory")
+        assertFailsWith<IllegalArgumentException> {
+            manager.openWorkspace("Test", filePath)
+        }
     }
 }

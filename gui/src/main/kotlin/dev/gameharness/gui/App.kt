@@ -59,6 +59,7 @@ private fun MainScreen(
 
     var showSettings by remember { mutableStateOf(false) }
     var showNewWorkspace by remember { mutableStateOf(false) }
+    var showOpenWorkspace by remember { mutableStateOf(false) }
     var showContextDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -88,6 +89,10 @@ private fun MainScreen(
                         showNewWorkspace = true
                         true
                     }
+                    event.isShiftPressed && event.key == Key.O -> {
+                        showOpenWorkspace = true
+                        true
+                    }
                     else -> false
                 }
             } else false
@@ -110,6 +115,7 @@ private fun MainScreen(
                             currentWorkspace = currentWorkspace,
                             onWorkspaceSelected = { viewModel.selectWorkspace(it) },
                             onWorkspaceCreated = { name, path -> viewModel.createWorkspace(name, path) },
+                            onWorkspaceOpened = { name, path -> viewModel.openWorkspace(name, path) },
                             onWorkspaceRenamed = { ws, name -> viewModel.renameWorkspace(ws, name) },
                             onWorkspaceDeleted = { viewModel.deleteWorkspace(it) },
                             modifier = Modifier.weight(1f)
@@ -200,6 +206,7 @@ private fun MainScreen(
                         onSplitSheet = { asset, w, h, skip, bgColor, bgTol, folder ->
                             viewModel.splitSpriteSheet(asset, w, h, skip, bgColor, bgTol, folder)
                         },
+                        onTrimAsset = { viewModel.trimSprite(it) },
                         modifier = Modifier.weight(1f).padding(8.dp)
                     )
 
@@ -236,6 +243,16 @@ private fun MainScreen(
                 showNewWorkspace = false
             },
             onDismiss = { showNewWorkspace = false }
+        )
+    }
+
+    if (showOpenWorkspace) {
+        OpenWorkspaceDialog(
+            onConfirm = { name, path ->
+                viewModel.openWorkspace(name, path)
+                showOpenWorkspace = false
+            },
+            onDismiss = { showOpenWorkspace = false }
         )
     }
 

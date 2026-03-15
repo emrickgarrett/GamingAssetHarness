@@ -25,7 +25,8 @@ internal fun AssetDetailView(
     onRevise: (asset: GeneratedAsset, request: String) -> Unit,
     onSplitSheet: (asset: GeneratedAsset, tileWidth: Int, tileHeight: Int,
                    skipEmpty: Boolean, removeBgColor: java.awt.Color?, bgTolerance: Int,
-                   targetFolder: String?) -> Unit = { _, _, _, _, _, _, _ -> }
+                   targetFolder: String?) -> Unit = { _, _, _, _, _, _, _ -> },
+    onTrimAsset: (asset: GeneratedAsset) -> Unit = {}
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showReviseDialog by remember { mutableStateOf(false) }
@@ -112,6 +113,11 @@ internal fun AssetDetailView(
             }
 
             if (asset.type == AssetType.SPRITE) {
+                OutlinedButton(
+                    onClick = { onTrimAsset(asset) }
+                ) {
+                    Text("\u2702  Trim")
+                }
                 OutlinedButton(
                     onClick = { showSplitDialog = true }
                 ) {

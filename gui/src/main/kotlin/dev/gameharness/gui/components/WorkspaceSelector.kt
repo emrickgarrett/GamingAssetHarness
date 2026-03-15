@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.dp
 import dev.gameharness.core.model.Workspace
 import dev.gameharness.gui.LocalAwtWindow
 import dev.gameharness.gui.util.pickFolder
+import java.nio.file.Files
 import java.nio.file.Path
 
 /** Dropdown selector for switching between workspaces, with inline rename/delete actions and a "New" button. */
@@ -20,12 +21,14 @@ fun WorkspaceSelector(
     currentWorkspace: Workspace?,
     onWorkspaceSelected: (Workspace) -> Unit,
     onWorkspaceCreated: (String, Path) -> Unit,
+    onWorkspaceOpened: (String, Path) -> Unit = { _, _ -> },
     onWorkspaceRenamed: (Workspace, String) -> Unit = { _, _ -> },
     onWorkspaceDeleted: (Workspace) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
     var showNewDialog by remember { mutableStateOf(false) }
+    var showOpenDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Workspace?>(null) }
     var deleteTarget by remember { mutableStateOf<Workspace?>(null) }
 
@@ -122,6 +125,12 @@ fun WorkspaceSelector(
 
         Spacer(Modifier.width(8.dp))
 
+        OutlinedButton(onClick = { showOpenDialog = true }) {
+            Text("Open")
+        }
+
+        Spacer(Modifier.width(4.dp))
+
         Button(
             onClick = { showNewDialog = true },
             colors = ButtonDefaults.buttonColors(
@@ -139,6 +148,16 @@ fun WorkspaceSelector(
                 showNewDialog = false
             },
             onDismiss = { showNewDialog = false }
+        )
+    }
+
+    if (showOpenDialog) {
+        OpenWorkspaceDialog(
+            onConfirm = { name, path ->
+                onWorkspaceOpened(name, path)
+                showOpenDialog = false
+            },
+            onDismiss = { showOpenDialog = false }
         )
     }
 
@@ -260,6 +279,114 @@ fun NewWorkspaceDialog(
                 enabled = name.isNotBlank() && selectedPath != null
             ) {
                 Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+/**
+ * Dialog for opening an existing directory as a workspace.
+ * Shows a folder picker and a name field. If the selected folder
+ * already contains workspace.json, the name auto-populates from it.
+ * Public so it can be reused from App.kt for the keyboard shortcut dialog.
+ */
+@Composable
+fun OpenWorkspaceDialog(
+    onConfirm: (String, Path) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var selectedPath by remember { mutableStateOf<Path?>(null) }
+    var hasExistingMetadata by remember { mutableStateOf(false) }
+    val awtWindow = LocalAwtWindow.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Open Folder as Workspace") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = selectedPath?.toString() ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Folder") },
+                        placeholder = { Text("Choose a folder...") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        val picked = pickFolder(awtWindow, "Open Folder as Workspace")
+                        if (picked != null) {
+                            selectedPath = picked
+                            val metadataFile = picked.resolve("workspace.json")
+                            if (metadataFile.toFile().exists()) {
+                                hasExistingMetadata = true
+                                try {
+                                    val content = Files.readString(metadataFile)
+                                    // Extract name from JSON without requiring serialization dependency
+                                    val nameMatch = Regex(""""name"\s*:\s*"([^"]+)"""").find(content)
+                                    name = nameMatch?.groupValues?.get(1) ?: picked.fileName?.toString() ?: ""
+                                } catch (_: Exception) {
+                                    name = picked.fileName?.toString() ?: ""
+                                }
+                            } else {
+                                hasExistingMetadata = false
+                                name = picked.fileName?.toString() ?: ""
+                            }
+                        }
+                    }) {
+                        Text("Browse...")
+                    }
+                }
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { if (!hasExistingMetadata) name = it },
+                    label = { Text("Workspace name") },
+                    placeholder = { Text("My Game Project") },
+                    singleLine = true,
+                    readOnly = hasExistingMetadata,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (hasExistingMetadata) {
+                    Text(
+                        text = "This folder contains existing workspace metadata. " +
+                            "It will be imported with its existing name.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (selectedPath != null) {
+                    Text(
+                        text = "A workspace will be initialized in this folder. " +
+                            "Existing files will not be modified.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val path = selectedPath
+                    if (name.isNotBlank() && path != null) {
+                        onConfirm(name.trim(), path)
+                    }
+                },
+                enabled = name.isNotBlank() && selectedPath != null
+            ) {
+                Text("Open")
             }
         },
         dismissButton = {

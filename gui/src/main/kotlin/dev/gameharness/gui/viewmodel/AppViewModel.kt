@@ -194,6 +194,23 @@ class AppViewModel(
         }
     }
 
+    /** Opens an existing directory as a workspace and selects it. Discovers any existing assets. */
+    fun openWorkspace(name: String, directory: Path) {
+        try {
+            val workspace = workspaceManager.openWorkspace(name, directory)
+            refreshWorkspaces()
+            selectWorkspace(workspace)
+            val assetCount = workspace.assets.size
+            if (assetCount > 0) {
+                _snackbarMessage.tryEmit(
+                    "Opened workspace with $assetCount existing asset${if (assetCount != 1) "s" else ""}"
+                )
+            }
+        } catch (e: Exception) {
+            _snackbarMessage.tryEmit("Failed to open workspace: ${e.message}")
+        }
+    }
+
     /** Renames the given workspace and updates the agent if it is the current workspace. */
     fun renameWorkspace(workspace: Workspace, newName: String) {
         try {
@@ -339,6 +356,35 @@ class AppViewModel(
         } catch (e: Exception) {
             log.error("Failed to split sprite sheet: {}", e.message, e)
             _snackbarMessage.tryEmit("Failed to split sprite sheet: ${e.message}")
+        }
+    }
+
+    /**
+     * Trims transparent borders from a sprite asset by cropping to the bounding
+     * box of opaque pixels. Overwrites the existing file with the trimmed image
+     * and updates workspace metadata.
+     */
+    fun trimSprite(asset: GeneratedAsset) {
+        val ws = _currentWorkspace.value ?: return
+        try {
+            val image = ImageIO.read(File(asset.filePath))
+                ?: throw IllegalStateException("Cannot read image: ${asset.filePath}")
+
+            val result = SpriteSheetSplitter.trimTransparent(image)
+
+            if (!result.wasTrimmed) {
+                _snackbarMessage.tryEmit("No transparent borders to trim")
+                return
+            }
+
+            val trimmedBytes = SpriteSheetSplitter.tileToBytes(result.image)
+            _currentWorkspace.value = workspaceManager.replaceAssetFile(ws, asset.id, trimmedBytes)
+            _snackbarMessage.tryEmit(
+                "Trimmed: ${result.originalWidth}×${result.originalHeight} → ${result.trimmedWidth}×${result.trimmedHeight}"
+            )
+        } catch (e: Exception) {
+            log.error("Failed to trim sprite: {}", e.message, e)
+            _snackbarMessage.tryEmit("Failed to trim sprite: ${e.message}")
         }
     }
 

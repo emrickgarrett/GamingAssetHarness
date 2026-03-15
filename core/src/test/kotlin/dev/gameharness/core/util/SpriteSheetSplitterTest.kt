@@ -513,6 +513,84 @@ class SpriteSheetSplitterTest {
         assertEquals(255, pass2Layer3Alpha, "Second pass should NOT remove layer 3")
     }
 
+    // ── trimTransparent() ─────────────────────────────────────────────
+
+    @Test
+    fun `trimTransparent crops uniform transparent border`() {
+        // 10x10 image with a 4x4 red block at (3,3)-(6,6)
+        val img = BufferedImage(10, 10, BufferedImage.TYPE_INT_ARGB)
+        for (y in 3..6) for (x in 3..6) img.setRGB(x, y, Color.RED.rgb)
+
+        val result = SpriteSheetSplitter.trimTransparent(img)
+
+        assertTrue(result.wasTrimmed)
+        assertEquals(10, result.originalWidth)
+        assertEquals(10, result.originalHeight)
+        assertEquals(4, result.trimmedWidth)
+        assertEquals(4, result.trimmedHeight)
+        assertEquals(4, result.image.width)
+        assertEquals(4, result.image.height)
+        // All pixels in the cropped image should be red
+        for (y in 0 until 4) for (x in 0 until 4) {
+            assertEquals(Color.RED.rgb, result.image.getRGB(x, y))
+        }
+    }
+
+    @Test
+    fun `trimTransparent returns unchanged for image with no transparent border`() {
+        val img = createTestImage(8, 8, Color.BLUE)
+        val result = SpriteSheetSplitter.trimTransparent(img)
+
+        assertFalse(result.wasTrimmed)
+        assertEquals(8, result.originalWidth)
+        assertEquals(8, result.originalHeight)
+        assertEquals(8, result.trimmedWidth)
+        assertEquals(8, result.trimmedHeight)
+        assertEquals(8, result.image.width)
+        assertEquals(8, result.image.height)
+    }
+
+    @Test
+    fun `trimTransparent returns 1x1 for fully transparent image`() {
+        val img = BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB)
+
+        val result = SpriteSheetSplitter.trimTransparent(img)
+
+        assertTrue(result.wasTrimmed)
+        assertEquals(16, result.originalWidth)
+        assertEquals(16, result.originalHeight)
+        assertEquals(1, result.trimmedWidth)
+        assertEquals(1, result.trimmedHeight)
+        assertTrue(SpriteSheetSplitter.isFullyTransparent(result.image))
+    }
+
+    @Test
+    fun `trimTransparent handles asymmetric margins`() {
+        // 20x10 image with a single pixel at (2, 7) — asymmetric borders
+        val img = BufferedImage(20, 10, BufferedImage.TYPE_INT_ARGB)
+        img.setRGB(2, 7, Color.GREEN.rgb)
+
+        val result = SpriteSheetSplitter.trimTransparent(img)
+
+        assertTrue(result.wasTrimmed)
+        assertEquals(1, result.trimmedWidth)
+        assertEquals(1, result.trimmedHeight)
+        assertEquals(Color.GREEN.rgb, result.image.getRGB(0, 0))
+    }
+
+    @Test
+    fun `trimTransparent does not modify original image`() {
+        val img = BufferedImage(10, 10, BufferedImage.TYPE_INT_ARGB)
+        for (y in 3..6) for (x in 3..6) img.setRGB(x, y, Color.RED.rgb)
+        val originalPixel = img.getRGB(5, 5)
+
+        SpriteSheetSplitter.trimTransparent(img)
+
+        assertEquals(originalPixel, img.getRGB(5, 5), "Original image should not be modified")
+        // Transparent corners should still be transparent
+        assertEquals(0, (img.getRGB(0, 0) ushr 24) and 0xFF)
+    }
+
     @Test
     fun `defringeEdges works with magenta chroma key`() {
         val magenta = Color(0xFF, 0x00, 0xFF)

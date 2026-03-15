@@ -47,6 +47,25 @@ data class SplitResult(
 )
 
 /**
+ * Result of trimming transparent borders from a sprite image.
+ *
+ * @property image The trimmed image (or copy of original if nothing was trimmed).
+ * @property originalWidth Width of the source image before trimming.
+ * @property originalHeight Height of the source image before trimming.
+ * @property trimmedWidth Width after trimming.
+ * @property trimmedHeight Height after trimming.
+ * @property wasTrimmed True if any transparent borders were removed.
+ */
+data class TrimResult(
+    val image: BufferedImage,
+    val originalWidth: Int,
+    val originalHeight: Int,
+    val trimmedWidth: Int,
+    val trimmedHeight: Int,
+    val wasTrimmed: Boolean
+)
+
+/**
  * Utility for splitting sprite sheet images into individual tiles.
  *
  * Uses a grid-based approach: the user specifies tile dimensions, and the image
@@ -346,6 +365,84 @@ object SpriteSheetSplitter {
         }
 
         return copy
+    }
+
+    /**
+     * Trims transparent borders from a sprite image by cropping to the bounding
+     * box of all non-transparent (alpha > 0) pixels.
+     *
+     * If the image is fully transparent, returns a 1×1 transparent image.
+     * If no transparent borders exist, returns a copy of the original with
+     * [TrimResult.wasTrimmed] set to false.
+     *
+     * The original image is not modified.
+     *
+     * @param image the source image to trim
+     * @return a [TrimResult] with the trimmed image and metadata
+     */
+    fun trimTransparent(image: BufferedImage): TrimResult {
+        val w = image.width
+        val h = image.height
+
+        // Find bounding box of opaque pixels
+        var minX = w
+        var minY = h
+        var maxX = -1
+        var maxY = -1
+
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val alpha = (image.getRGB(x, y) ushr 24) and 0xFF
+                if (alpha > 0) {
+                    if (x < minX) minX = x
+                    if (x > maxX) maxX = x
+                    if (y < minY) minY = y
+                    if (y > maxY) maxY = y
+                }
+            }
+        }
+
+        // Fully transparent → return 1×1 transparent image
+        if (maxX < 0) {
+            val tiny = BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB)
+            tiny.setRGB(0, 0, 0x00000000)
+            return TrimResult(
+                image = tiny,
+                originalWidth = w, originalHeight = h,
+                trimmedWidth = 1, trimmedHeight = 1,
+                wasTrimmed = true
+            )
+        }
+
+        val cropW = maxX - minX + 1
+        val cropH = maxY - minY + 1
+
+        // No transparent borders → return unchanged copy
+        if (minX == 0 && minY == 0 && cropW == w && cropH == h) {
+            val copy = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+            val g = copy.createGraphics()
+            g.drawImage(image, 0, 0, null)
+            g.dispose()
+            return TrimResult(
+                image = copy,
+                originalWidth = w, originalHeight = h,
+                trimmedWidth = w, trimmedHeight = h,
+                wasTrimmed = false
+            )
+        }
+
+        // Crop to bounding box
+        val cropped = BufferedImage(cropW, cropH, BufferedImage.TYPE_INT_ARGB)
+        val g = cropped.createGraphics()
+        g.drawImage(image, 0, 0, cropW, cropH, minX, minY, maxX + 1, maxY + 1, null)
+        g.dispose()
+
+        return TrimResult(
+            image = cropped,
+            originalWidth = w, originalHeight = h,
+            trimmedWidth = cropW, trimmedHeight = cropH,
+            wasTrimmed = true
+        )
     }
 
     /**

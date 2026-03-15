@@ -153,6 +153,65 @@ class WorkspaceManager(registryDir: Path) {
         return workspace
     }
 
+    /**
+     * Opens an existing directory as a workspace, regardless of whether it is empty.
+     *
+     * If the directory already contains a valid `workspace.json`, it is imported
+     * (reusing the persisted name and metadata). Otherwise, workspace metadata is
+     * initialized in the directory — creating `assets/` subdirectories alongside
+     * any existing files — and a new `workspace.json` is written.
+     *
+     * Existing files are never modified or moved. After initialization,
+     * [syncAssets] discovers any files already present in the `assets/<type>/`
+     * subdirectories.
+     *
+     * @param name Display name for the workspace. Ignored if `workspace.json`
+     *     already exists (the persisted name is used instead).
+     * @param directory Path to the existing directory. Must exist and be a directory.
+     * @return The opened workspace with any discovered assets populated.
+     * @throws IllegalArgumentException if [name] is blank, [directory] does not
+     *     exist, or [directory] is not a directory.
+     */
+    fun openWorkspace(name: String, directory: Path): Workspace {
+        require(name.isNotBlank()) { "Workspace name must not be blank" }
+        require(directory.exists()) { "Directory does not exist: $directory" }
+        require(directory.isDirectory()) { "Path is not a directory: $directory" }
+
+        // Case 1: workspace.json already exists — import it
+        val existing = loadWorkspaceMetadata(directory)
+        if (existing != null) {
+            registry.addPath(directory.toAbsolutePath().toString())
+            // Ensure asset subdirectories exist (may have been deleted externally)
+            AssetType.entries.forEach { type ->
+                directory.resolve("assets").resolve(type.subdirectory).ensureDirectoryExists()
+            }
+            val synced = syncAssets(existing)
+            log.info("Opened existing workspace '{}' at {}", existing.name, directory.toAbsolutePath())
+            return synced
+        }
+
+        // Case 2: No workspace.json — initialize workspace metadata
+        AssetType.entries.forEach { type ->
+            directory.resolve("assets").resolve(type.subdirectory).ensureDirectoryExists()
+        }
+
+        val workspace = Workspace(
+            name = name,
+            directoryPath = directory.toAbsolutePath().toString()
+        )
+
+        saveWorkspaceMetadata(workspace)
+        registry.addPath(directory.toAbsolutePath().toString())
+
+        // Discover any existing assets in the asset subdirectories
+        val synced = syncAssets(workspace)
+        log.info(
+            "Opened directory as new workspace '{}' at {} ({} assets discovered)",
+            name, directory.toAbsolutePath(), synced.assets.size
+        )
+        return synced
+    }
+
     // --- Filesystem sync ---
 
     /**
@@ -372,6 +431,29 @@ class WorkspaceManager(registryDir: Path) {
     /** Reads the raw file bytes for an asset from disk. */
     fun loadAssetBytes(asset: GeneratedAsset): ByteArray {
         return Path.of(asset.filePath).readBytesSafely()
+    }
+
+    /**
+     * Replaces an asset's file on disk with new bytes and updates its [sizeBytes]
+     * in workspace metadata. The file path and all other metadata remain unchanged.
+     *
+     * @param workspace the workspace containing the asset
+     * @param assetId the ID of the asset to replace
+     * @param newBytes the new file content
+     * @return the updated workspace, or the original workspace if the asset was not found
+     */
+    fun replaceAssetFile(workspace: Workspace, assetId: String, newBytes: ByteArray): Workspace {
+        val asset = workspace.assets.find { it.id == assetId } ?: return workspace
+        val path = Path.of(asset.filePath)
+        Files.write(path, newBytes)
+        val updated = workspace.copy(
+            assets = workspace.assets.map {
+                if (it.id == assetId) it.copy(sizeBytes = newBytes.size.toLong()) else it
+            }
+        )
+        saveWorkspaceMetadata(updated)
+        log.info("Replaced asset file '{}' ({} bytes) in workspace '{}'", asset.fileName, newBytes.size, workspace.name)
+        return updated
     }
 
     /**

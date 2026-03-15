@@ -5,10 +5,12 @@ import dev.gameharness.cli.commands.ConfigShow
 import dev.gameharness.cli.commands.asset.AssetCmd
 import dev.gameharness.cli.commands.asset.AssetList
 import dev.gameharness.cli.commands.asset.AssetRevise
+import dev.gameharness.cli.commands.asset.AssetTrim
 import dev.gameharness.cli.commands.generate.*
 import dev.gameharness.cli.commands.workspace.WorkspaceCmd
 import dev.gameharness.cli.commands.workspace.WorkspaceCreate
 import dev.gameharness.cli.commands.workspace.WorkspaceList
+import dev.gameharness.cli.commands.workspace.WorkspaceOpen
 
 fun main(args: Array<String>) {
     GameHarnessCli()
@@ -21,11 +23,13 @@ fun main(args: Array<String>) {
             ),
             WorkspaceCmd().subcommands(
                 WorkspaceList(),
-                WorkspaceCreate()
+                WorkspaceCreate(),
+                WorkspaceOpen()
             ),
             AssetCmd().subcommands(
                 AssetList(),
-                AssetRevise()
+                AssetRevise(),
+                AssetTrim()
             ),
             ConfigShow()
         )

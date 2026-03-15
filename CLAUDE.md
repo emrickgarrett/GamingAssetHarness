@@ -153,11 +153,11 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 
 ## Test Summary
 
-- **Core**: 71 tests (models, config, workspace, file utils, retry logic, sprite sheet splitting, flood-fill bg removal, multi-pass defringe)
+- **Core**: 171 tests (models, config, workspace, file utils, retry logic, sprite sheet splitting, flood-fill bg removal, multi-pass defringe, trim transparent, replace asset file, open workspace, key encryption, settings manager)
 - **API Clients**: 35 tests (all 4 clients + rate limiter, chroma key prompt/color selection, using Ktor MockEngine)
 - **Agent**: 50 tests (agent lifecycle, bridge, system prompt, all tools)
-- **CLI**: 33 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate/revise commands)
-- **Total**: 275 tests, all passing
+- **CLI**: 38 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate/revise/trim/open commands)
+- **Total**: 294 tests, all passing
 
 ## CLI Module (`:cli`)
 
@@ -176,6 +176,9 @@ Requires JDK 21 with `JAVA_HOME` set. Use `-q` flag for clean JSON output.
 
 # Create a workspace
 ./gradlew :cli:run --args="workspace create -n 'MyGame' -p '/path/to/workspace'" -q
+
+# Open an existing folder as a workspace (auto-discovers assets)
+./gradlew :cli:run --args="workspace open -p '/path/to/existing-project' -n 'MyGame'" -q
 
 # Generate a sprite (fast, ~10s)
 ./gradlew :cli:run --args="generate sprite -w 'MyGame' -d 'a red potion bottle' -s 16bit" -q
@@ -197,6 +200,9 @@ Requires JDK 21 with `JAVA_HOME` set. Use `-q` flag for clean JSON output.
 
 # Revise a sprite (iterate on existing, fast ~10s)
 ./gradlew :cli:run --args="asset revise -w 'MyGame' -a 'potion_bottle_16bit.png' -d 'make the liquid glow blue'" -q
+
+# Trim transparent borders from a sprite (instant)
+./gradlew :cli:run --args="asset trim -w 'MyGame' -a 'potion_bottle_16bit.png'" -q
 
 # List assets
 ./gradlew :cli:run --args="asset list -w 'MyGame' --type SPRITE" -q

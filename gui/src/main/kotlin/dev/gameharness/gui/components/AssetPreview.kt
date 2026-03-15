@@ -38,6 +38,7 @@ fun AssetPreview(
     onSplitSheet: (asset: GeneratedAsset, tileWidth: Int, tileHeight: Int,
                    skipEmpty: Boolean, removeBgColor: java.awt.Color?, bgTolerance: Int,
                    targetFolder: String?) -> Unit = { _, _, _, _, _, _, _ -> },
+    onTrimAsset: (asset: GeneratedAsset) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Track which asset the user is browsing (null = grid view)
@@ -78,7 +79,8 @@ fun AssetPreview(
                     onReviseAsset(asset, request)
                     browsingAsset = null
                 },
-                onSplitSheet = onSplitSheet
+                onSplitSheet = onSplitSheet,
+                onTrimAsset = onTrimAsset
             )
 
             // Workspace has assets or folders — show the browser grid

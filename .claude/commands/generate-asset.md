@@ -41,6 +41,13 @@ Create a workspace if needed. **IMPORTANT: Always use an absolute path for `-p`*
 ./gradlew :cli:run --args="workspace create -n '<name>' -p '<absolute-path>'" -q
 ```
 
+Or open an existing project directory as a workspace. This initializes workspace metadata alongside existing files without touching them, and auto-discovers any assets already in `assets/<type>/` subdirectories:
+```bash
+./gradlew :cli:run --args="workspace open -p '<absolute-path>' -n '<name>'" -q
+```
+- `-n` is optional — defaults to the folder name
+- If the directory already contains a `workspace.json`, it will be imported (the persisted name is used)
+
 When choosing an existing workspace, check the `directoryPath` in the workspace list response. If it's a relative path (starts with `.`), prefer creating a new workspace with an absolute path instead, to avoid file resolution issues.
 
 ## Step 3: Generate the asset
@@ -112,7 +119,22 @@ If the user wants changes to a previously generated sprite, use `asset revise` i
 2. Show the user the result (use the Read tool on the `filePath` from the JSON response)
 3. If the user requests changes, use `asset revise` with the filename and revision instructions
 4. Repeat steps 2-3 until the user is satisfied
-5. To list all sprites: `asset list -w '<workspace-name>' --type SPRITE`
+5. Optionally, trim transparent borders with `asset trim` to reduce file size
+6. To list all sprites: `asset list -w '<workspace-name>' --type SPRITE`
+
+## Step 6: Trim transparent borders from a sprite
+
+After background removal, sprites may have extra transparent pixels around the edges. Use `asset trim` to crop to the bounding box of opaque content, reducing file size.
+
+```bash
+./gradlew :cli:run --args="asset trim -w '<workspace-name>' -a '<asset-filename>'" -q
+```
+
+- `-a` / `--asset`: The filename of the sprite to trim (supports partial matching like revise)
+- Only sprites can be trimmed (other asset types will return an error)
+- The JSON response includes: `originalWidth`, `originalHeight`, `trimmedWidth`, `trimmedHeight`, `originalSizeBytes`, `trimmedSizeBytes`, `wasTrimmed`
+- If `wasTrimmed` is false, the sprite had no transparent borders to remove — no file changes were made
+- The file is overwritten in-place (the original dimensions are lost)
 
 ## Listing workspace assets
 ```bash

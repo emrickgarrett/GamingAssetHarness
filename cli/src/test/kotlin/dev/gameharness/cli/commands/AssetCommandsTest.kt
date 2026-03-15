@@ -6,6 +6,7 @@ import dev.gameharness.cli.GameHarnessCli
 import dev.gameharness.cli.commands.asset.AssetCmd
 import dev.gameharness.cli.commands.asset.AssetList
 import dev.gameharness.cli.commands.asset.AssetRevise
+import dev.gameharness.cli.commands.asset.AssetTrim
 import dev.gameharness.cli.commands.workspace.WorkspaceCmd
 import dev.gameharness.cli.commands.workspace.WorkspaceCreate
 import dev.gameharness.core.model.*
@@ -52,7 +53,7 @@ class AssetCommandsTest {
     private fun buildCli(): GameHarnessCli {
         return GameHarnessCli().subcommands(
             WorkspaceCmd().subcommands(WorkspaceCreate()),
-            AssetCmd().subcommands(AssetList(), AssetRevise())
+            AssetCmd().subcommands(AssetList(), AssetRevise(), AssetTrim())
         )
     }
 
@@ -246,5 +247,67 @@ class AssetCommandsTest {
         val parsed = json.decodeFromString(CliResponse.serializer(), output)
         assertEquals(false, parsed.success)
         assertEquals("FILE_NOT_FOUND", parsed.error!!.code)
+    }
+
+    // ── asset trim ──────────────────────────────────────────────────
+
+    @Test
+    fun `asset trim returns error for missing workspace`() {
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "asset", "trim",
+                "-w", "DoesNotExist",
+                "-a", "sprite.png"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("asset.trim", parsed.command)
+        assertEquals("NOT_FOUND", parsed.error!!.code)
+    }
+
+    @Test
+    fun `asset trim returns error when asset not found`() {
+        createWorkspace("TrimEmpty")
+
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "asset", "trim",
+                "-w", "TrimEmpty",
+                "-a", "nonexistent.png"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("ASSET_NOT_FOUND", parsed.error!!.code)
+    }
+
+    @Test
+    fun `asset trim returns error for non-sprite asset`() {
+        val wsDir = createWorkspace("TrimModel")
+        val modelAsset = GeneratedAsset(
+            id = "model-trim-001",
+            type = AssetType.MODEL_3D,
+            fileName = "chest.glb",
+            filePath = wsDir.resolve("assets/models/chest.glb").toAbsolutePath().toString(),
+            format = "glb",
+            description = "a treasure chest"
+        )
+        writeWorkspaceWithAssets(wsDir, "TrimModel", listOf(modelAsset))
+
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "asset", "trim",
+                "-w", "TrimModel",
+                "-a", "chest.glb"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("UNSUPPORTED_TYPE", parsed.error!!.code)
+        assertTrue(parsed.error!!.message.contains("Only sprites"))
     }
 }
