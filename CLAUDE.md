@@ -156,8 +156,8 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 - **Core**: 71 tests (models, config, workspace, file utils, retry logic, sprite sheet splitting, flood-fill bg removal, multi-pass defringe)
 - **API Clients**: 35 tests (all 4 clients + rate limiter, chroma key prompt/color selection, using Ktor MockEngine)
 - **Agent**: 50 tests (agent lifecycle, bridge, system prompt, all tools)
-- **CLI**: 28 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate commands)
-- **Total**: 270 tests, all passing
+- **CLI**: 33 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate/revise commands)
+- **Total**: 275 tests, all passing
 
 ## CLI Module (`:cli`)
 
@@ -194,6 +194,9 @@ Requires JDK 21 with `JAVA_HOME` set. Use `-q` flag for clean JSON output.
 
 # Generate a sound effect (fast, ~5s)
 ./gradlew :cli:run --args="generate sfx -w 'MyGame' -d 'coin pickup sound' --duration 1.0" -q
+
+# Revise a sprite (iterate on existing, fast ~10s)
+./gradlew :cli:run --args="asset revise -w 'MyGame' -a 'potion_bottle_16bit.png' -d 'make the liquid glow blue'" -q
 
 # List assets
 ./gradlew :cli:run --args="asset list -w 'MyGame' --type SPRITE" -q

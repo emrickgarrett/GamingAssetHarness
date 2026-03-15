@@ -90,7 +90,29 @@ Parse the JSON response. On success, `data.filePath` has the absolute path to th
 
 - For sprites (PNG), use the Read tool to view the image and show the user
 - Copy or reference the file in the current project as needed
-- If the user wants changes, generate again with an adjusted description
+- If the user wants changes to a sprite, use `asset revise` (see Step 5)
+
+## Step 5: Revise an existing sprite
+
+If the user wants changes to a previously generated sprite, use `asset revise` instead of generating from scratch. This automatically uses the original sprite as a reference image so the AI can see what it's revising, and inherits style/dimensions from the original.
+
+```bash
+./gradlew :cli:run --args="asset revise -w '<workspace-name>' -a '<asset-filename>' -d '<revision instructions>'" -q
+```
+
+- `-a` / `--asset`: The filename of the sprite to revise (from `asset list` output). Supports partial matching, but use exact filename to avoid ambiguity.
+- `-d` / `--description`: What to change (e.g., "make the sword glow blue", "add a shield", "change to darker tones")
+- Style, aspect ratio, dimensions, folder, and background removal settings are automatically inherited from the original. Override with `-s`, `--aspect-ratio`, `--width`, `--height`, `--image-size`, `--no-bg-removal`, `-f` if needed.
+- Only sprites can be revised (other asset types will return an error).
+- The JSON response includes `originalFileName` so you can track provenance.
+
+### Iteration workflow
+
+1. Generate the initial sprite with `generate sprite`
+2. Show the user the result (use the Read tool on the `filePath` from the JSON response)
+3. If the user requests changes, use `asset revise` with the filename and revision instructions
+4. Repeat steps 2-3 until the user is satisfied
+5. To list all sprites: `asset list -w '<workspace-name>' --type SPRITE`
 
 ## Listing workspace assets
 ```bash

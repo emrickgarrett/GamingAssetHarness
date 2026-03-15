@@ -67,7 +67,7 @@ $JAVA_HOME/bin/java -version
 ./gradlew build
 ```
 
-This compiles all modules and runs the full test suite (270 tests).
+This compiles all modules and runs the full test suite (275 tests).
 
 ### 4. Run the application
 
@@ -220,8 +220,9 @@ Available commands:
 - `workspace list` / `workspace create` — manage workspaces
 - `generate sprite|model|music|sfx` — generate assets
 - `asset list` — list assets in a workspace
+- `asset revise` — revise an existing sprite using it as a reference image
 
-All generated assets are auto-approved and saved to the workspace. If you don't like a result, tell Claude and it will regenerate with an adjusted description.
+All generated assets are auto-approved and saved to the workspace. If you don't like a result, use `asset revise` to iterate on sprites with the original as a visual reference, or tell Claude to regenerate with an adjusted description.
 
 ## Project Structure
 
@@ -288,7 +289,7 @@ your-workspace-folder/
 ### Running Tests
 
 ```bash
-# All tests (270 across all modules)
+# All tests (275 across all modules)
 ./gradlew test
 
 # Specific module

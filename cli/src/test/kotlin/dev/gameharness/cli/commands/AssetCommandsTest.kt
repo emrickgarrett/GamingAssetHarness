@@ -5,8 +5,11 @@ import dev.gameharness.cli.CliResponse
 import dev.gameharness.cli.GameHarnessCli
 import dev.gameharness.cli.commands.asset.AssetCmd
 import dev.gameharness.cli.commands.asset.AssetList
+import dev.gameharness.cli.commands.asset.AssetRevise
 import dev.gameharness.cli.commands.workspace.WorkspaceCmd
 import dev.gameharness.cli.commands.workspace.WorkspaceCreate
+import dev.gameharness.core.model.*
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -16,6 +19,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -39,10 +43,16 @@ class AssetCommandsTest {
         return baos.toString().trim()
     }
 
+    private val wsJson = Json {
+        ignoreUnknownKeys = true
+        prettyPrint = false
+        encodeDefaults = true
+    }
+
     private fun buildCli(): GameHarnessCli {
         return GameHarnessCli().subcommands(
             WorkspaceCmd().subcommands(WorkspaceCreate()),
-            AssetCmd().subcommands(AssetList())
+            AssetCmd().subcommands(AssetList(), AssetRevise())
         )
     }
 
@@ -106,5 +116,135 @@ class AssetCommandsTest {
         val parsed = json.decodeFromString(CliResponse.serializer(), output)
         assertEquals(false, parsed.success)
         assertEquals("INVALID_ARGS", parsed.error!!.code)
+    }
+
+    // ── asset revise ─────────────────────────────────────────────────
+
+    /** Writes a workspace.json with the given assets into an existing workspace directory. */
+    private fun writeWorkspaceWithAssets(wsDir: Path, wsName: String, assets: List<GeneratedAsset>) {
+        val workspace = Workspace(
+            name = wsName,
+            directoryPath = wsDir.toAbsolutePath().toString(),
+            assets = assets
+        )
+        Files.writeString(wsDir.resolve("workspace.json"), wsJson.encodeToString(workspace))
+    }
+
+    @Test
+    fun `asset revise returns error for missing workspace`() {
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "asset", "revise",
+                "-w", "DoesNotExist",
+                "-a", "sprite.png",
+                "-d", "make it brighter"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("asset.revise", parsed.command)
+        assertEquals("NOT_FOUND", parsed.error!!.code)
+    }
+
+    @Test
+    fun `asset revise returns error when asset not found`() {
+        val wsDir = createWorkspace("ReviseEmpty")
+
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "asset", "revise",
+                "-w", "ReviseEmpty",
+                "-a", "nonexistent.png",
+                "-d", "make it brighter"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("ASSET_NOT_FOUND", parsed.error!!.code)
+    }
+
+    @Test
+    fun `asset revise returns error for non-sprite asset`() {
+        val wsDir = createWorkspace("ReviseModel")
+        val modelAsset = GeneratedAsset(
+            id = "model-001",
+            type = AssetType.MODEL_3D,
+            fileName = "chest.glb",
+            filePath = wsDir.resolve("assets/models/chest.glb").toAbsolutePath().toString(),
+            format = "glb",
+            description = "a treasure chest"
+        )
+        writeWorkspaceWithAssets(wsDir, "ReviseModel", listOf(modelAsset))
+
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "asset", "revise",
+                "-w", "ReviseModel",
+                "-a", "chest.glb",
+                "-d", "make it bigger"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("UNSUPPORTED_TYPE", parsed.error!!.code)
+        assertTrue(parsed.error!!.message.contains("Only sprites"))
+    }
+
+    @Test
+    fun `asset revise returns error for ambiguous match`() {
+        val wsDir = createWorkspace("ReviseAmbig")
+        val sprite1 = GeneratedAsset(
+            id = "s1", type = AssetType.SPRITE, fileName = "sword_red.png",
+            filePath = wsDir.resolve("assets/sprites/sword_red.png").toAbsolutePath().toString(),
+            format = "png", description = "red sword"
+        )
+        val sprite2 = GeneratedAsset(
+            id = "s2", type = AssetType.SPRITE, fileName = "sword_blue.png",
+            filePath = wsDir.resolve("assets/sprites/sword_blue.png").toAbsolutePath().toString(),
+            format = "png", description = "blue sword"
+        )
+        writeWorkspaceWithAssets(wsDir, "ReviseAmbig", listOf(sprite1, sprite2))
+
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "asset", "revise",
+                "-w", "ReviseAmbig",
+                "-a", "sword",
+                "-d", "add glow effect"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("AMBIGUOUS_MATCH", parsed.error!!.code)
+        assertTrue(parsed.error!!.message.contains("sword_red.png"))
+        assertTrue(parsed.error!!.message.contains("sword_blue.png"))
+    }
+
+    @Test
+    fun `asset revise returns error when original file missing from disk`() {
+        val wsDir = createWorkspace("ReviseMissing")
+        val ghostAsset = GeneratedAsset(
+            id = "ghost-001", type = AssetType.SPRITE, fileName = "deleted_sprite.png",
+            filePath = wsDir.resolve("assets/sprites/deleted_sprite.png").toAbsolutePath().toString(),
+            format = "png", description = "a sprite that was deleted"
+        )
+        writeWorkspaceWithAssets(wsDir, "ReviseMissing", listOf(ghostAsset))
+
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "asset", "revise",
+                "-w", "ReviseMissing",
+                "-a", "deleted_sprite.png",
+                "-d", "make it brighter"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("FILE_NOT_FOUND", parsed.error!!.code)
     }
 }

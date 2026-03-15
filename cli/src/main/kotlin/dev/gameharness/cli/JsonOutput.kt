@@ -58,3 +58,19 @@ fun assetToJson(
     put("status", status)
     put("folder", folder)
 }
+
+fun revisionAssetToJson(
+    asset: dev.gameharness.core.model.GeneratedAsset,
+    originalFileName: String
+): JsonObject = buildJsonObject {
+    put("assetId", asset.id)
+    put("fileName", asset.fileName)
+    put("filePath", asset.filePath)
+    put("type", asset.type.name)
+    put("format", asset.format)
+    put("description", asset.description)
+    put("sizeBytes", asset.sizeBytes)
+    put("status", asset.status.name)
+    put("folder", asset.folder)
+    put("originalFileName", originalFileName)
+}
