@@ -202,20 +202,38 @@ class GeminiClient(
     private fun removeBackground(bytes: ByteArray, chromaKey: ChromaKeyConfig): ByteArray {
         val image = ImageIO.read(ByteArrayInputStream(bytes))
             ?: throw IllegalStateException("Could not decode image for background removal")
-        val floodFilled = SpriteSheetSplitter.removeBackgroundFloodFill(
+        // The model doesn't always render the exact key hex: remove background
+        // by key-channel dominance (robust to hue drift, can't eat dark
+        // outlines), and measure the real border color for tint un-mixing.
+        val bgColor = SpriteSheetSplitter.estimateBorderColor(image, chromaKey.color)
+            ?: chromaKey.color
+        val floodFilled = SpriteSheetSplitter.removeBackgroundKeyness(
             image,
-            bgColor = chromaKey.color,
-            tolerance = CHROMA_KEY_TOLERANCE
+            bgColor = chromaKey.color
         )
         // Run multiple defringe passes to remove multi-pixel anti-aliasing gradients
         var result = floodFilled
         repeat(DEFRINGE_PASSES) {
             result = SpriteSheetSplitter.defringeEdges(
                 result,
-                bgColor = chromaKey.color,
+                bgColor = bgColor,
                 tolerance = DEFRINGE_TOLERANCE
             )
         }
+        // Un-mix residual key tint from surviving edge pixels (blends that are
+        // mostly sprite pass the defringe tolerance but still carry a faint
+        // key-colored halo). Depth scales with resolution: wider anti-aliasing
+        // gradients on larger renders.
+        result = SpriteSheetSplitter.decontaminateEdges(
+            result,
+            bgColor = bgColor,
+            maxDepth = decontaminateDepth(result.width, result.height)
+        )
+        // Drop orphaned specks of background/blend noise
+        result = SpriteSheetSplitter.removeSmallIslands(
+            result,
+            minArea = islandMinArea(result.width, result.height)
+        )
         return SpriteSheetSplitter.tileToBytes(result)
     }
 
@@ -275,6 +293,18 @@ class GeminiClient(
             "lilac", "orchid", "plum", "mauve"
         )
 
+        /** Edge-decontamination depth scaled to image resolution. */
+        fun decontaminateDepth(width: Int, height: Int): Int =
+            (minOf(width, height) / 128).coerceAtLeast(4)
+
+        /**
+         * Minimum connected-component area (in pixels) scaled to image
+         * resolution: ~0.02% of the canvas, at least 16px. Intentional sprite
+         * elements are orders of magnitude larger.
+         */
+        fun islandMinArea(width: Int, height: Int): Int =
+            (width * height / 5000).coerceAtLeast(16)
+
         /**
          * Selects the best chroma key color based on the sprite description to
          * avoid conflicts with the sprite content.
@@ -282,8 +312,11 @@ class GeminiClient(
          * - Default: green (#00b140)
          * - If description mentions green-related content: magenta (#ff00ff)
          * - If both green and magenta/purple conflict: blue (#0000ff)
+         *
+         * Public so that post-hoc cleanup tooling can reproduce the key that a
+         * stored asset was generated with from its saved description.
          */
-        internal fun selectChromaKeyColor(description: String): ChromaKeyConfig {
+        fun selectChromaKeyColor(description: String): ChromaKeyConfig {
             val lower = description.lowercase()
             val words = lower.split(Regex("[\\s,.:;!?()\\[\\]{}\"'/-]+")).toSet()
             val hasGreen = words.any { it in GREEN_KEYWORDS }

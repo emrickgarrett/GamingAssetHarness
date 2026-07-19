@@ -604,4 +604,172 @@ class SpriteSheetSplitterTest {
         // Edge near-magenta pixels should be removed (distance 94 <= 120)
         assertEquals(0, (result.getRGB(1, 1) ushr 24) and 0xFF, "Near-magenta edge should be removed")
     }
+
+    // ── decontaminateEdges() ────────────────────────────────────────────
+
+    /** 8×8: transparent border, 1px green-contaminated ring, solid core. */
+    private fun createContaminatedSprite(core: Color, blend: Color): BufferedImage {
+        val img = BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 8) for (x in 0 until 8) img.setRGB(x, y, 0x00000000)
+        for (y in 2..5) for (x in 2..5) img.setRGB(x, y, blend.rgb) // ring
+        for (y in 3..4) for (x in 3..4) img.setRGB(x, y, core.rgb)  // core
+        return img
+    }
+
+    @Test
+    fun `decontaminateEdges removes green halo blend but keeps sprite core`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        // 50/50 blend of dark navy (10,18,32) and the green key -> green-dominant
+        val halo = Color(5, 97, 48)
+        val img = createContaminatedSprite(core = Color.RED, blend = halo)
+
+        val result = SpriteSheetSplitter.decontaminateEdges(img, green, maxDepth = 4)
+
+        val haloAlpha = (result.getRGB(2, 2) ushr 24) and 0xFF
+        assertTrue(haloAlpha < 160, "Green-dominant halo pixel should lose most alpha, was $haloAlpha")
+        assertEquals(Color.RED.rgb, result.getRGB(3, 3), "Core pixel must be untouched")
+    }
+
+    @Test
+    fun `decontaminateEdges leaves non-key edge colors untouched`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val navy = Color(10, 18, 32) // dark outline: no green excess
+        val img = createContaminatedSprite(core = Color.RED, blend = navy)
+
+        val result = SpriteSheetSplitter.decontaminateEdges(img, green, maxDepth = 4)
+
+        assertEquals(navy.rgb or (0xFF shl 24), result.getRGB(2, 2), "Navy outline edge must be preserved")
+    }
+
+    @Test
+    fun `decontaminateEdges does not touch interior pixels beyond maxDepth`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val greenish = Color(20, 200, 60)
+        val img = BufferedImage(20, 20, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 20) for (x in 0 until 20) img.setRGB(x, y, 0x00000000)
+        for (y in 2..17) for (x in 2..17) img.setRGB(x, y, greenish.rgb)
+
+        val result = SpriteSheetSplitter.decontaminateEdges(img, green, maxDepth = 2)
+
+        // Center is depth > 2 from transparency: even a green-dominant color survives
+        assertEquals(greenish.rgb or (0xFF shl 24), result.getRGB(10, 10))
+    }
+
+    @Test
+    fun `decontaminateEdges works with magenta chroma key`() {
+        val magenta = Color(0xFF, 0x00, 0xFF)
+        // Blend of sea green (0x59,0xD1,0x85) with magenta -> pink-tinted halo
+        val halo = Color(170, 104, 190)
+        val img = createContaminatedSprite(core = Color(0x59, 0xD1, 0x85), blend = halo)
+
+        val result = SpriteSheetSplitter.decontaminateEdges(img, magenta, maxDepth = 4)
+
+        val haloAlpha = (result.getRGB(2, 2) ushr 24) and 0xFF
+        assertTrue(haloAlpha < 200, "Magenta-dominant halo pixel should lose alpha, was $haloAlpha")
+        assertEquals(Color(0x59, 0xD1, 0x85).rgb or (0xFF shl 24), result.getRGB(3, 3), "Core must be untouched")
+    }
+
+    // ── estimateBorderColor() / removeSmallIslands() ────────────────────
+
+    @Test
+    fun `estimateBorderColor measures off-key background`() {
+        val offMagenta = Color(197, 42, 204) // drifted from #ff00ff
+        val img = createTestImage(64, 64, offMagenta)
+
+        val estimated = SpriteSheetSplitter.estimateBorderColor(img, Color(0xFF, 0x00, 0xFF))
+
+        assertNotNull(estimated)
+        assertEquals(197, estimated.red)
+        assertEquals(42, estimated.green)
+        assertEquals(204, estimated.blue)
+    }
+
+    @Test
+    fun `estimateBorderColor returns null when background already removed`() {
+        val img = BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB)
+        for (y in 20..40) for (x in 20..40) img.setRGB(x, y, Color.RED.rgb)
+
+        val estimated = SpriteSheetSplitter.estimateBorderColor(img, Color(0x00, 0xB1, 0x40))
+
+        assertNull(estimated)
+    }
+
+    @Test
+    fun `estimateBorderColor ignores border pixels unrelated to the key`() {
+        // Border is white (distance from green key = 255+78+191 = 524 > 400)
+        val img = createTestImage(64, 64, Color.WHITE)
+
+        val estimated = SpriteSheetSplitter.estimateBorderColor(img, Color(0x00, 0xB1, 0x40))
+
+        assertNull(estimated)
+    }
+
+    @Test
+    fun `removeBackgroundKeyness removes off-key background but keeps dark outline`() {
+        val magenta = Color(0xFF, 0x00, 0xFF)
+        val offMagenta = Color(197, 42, 204) // drifted render, distance 151 from key
+        val navy = Color(10, 18, 32)
+        val img = createTestImage(32, 32, offMagenta)
+        val g = img.createGraphics()
+        g.color = navy
+        g.fillRect(8, 8, 16, 16) // outlined sprite body
+        g.color = Color(0x59, 0xD1, 0x85)
+        g.fillRect(11, 11, 10, 10) // sea green interior
+        g.dispose()
+
+        val result = SpriteSheetSplitter.removeBackgroundKeyness(img, magenta)
+
+        assertEquals(0, (result.getRGB(2, 2) ushr 24) and 0xFF, "Off-key background removed")
+        assertEquals(navy.rgb or (0xFF shl 24), result.getRGB(9, 9), "Navy outline preserved")
+        assertEquals(Color(0x59, 0xD1, 0x85).rgb or (0xFF shl 24), result.getRGB(15, 15), "Interior preserved")
+    }
+
+    @Test
+    fun `removeBackgroundKeyness spares key-hued pixels inside the sprite`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val img = createTestImage(32, 32, green)
+        val g = img.createGraphics()
+        g.color = Color(10, 18, 32)
+        g.fillRect(8, 8, 16, 16) // solid navy ring blocks connectivity
+        g.color = Color(0x20, 0xC8, 0x3C) // green-dominant interior detail
+        g.fillRect(12, 12, 8, 8)
+        g.dispose()
+
+        val result = SpriteSheetSplitter.removeBackgroundKeyness(img, green)
+
+        assertEquals(0, (result.getRGB(2, 2) ushr 24) and 0xFF, "Background removed")
+        assertEquals(
+            Color(0x20, 0xC8, 0x3C).rgb or (0xFF shl 24), result.getRGB(15, 15),
+            "Key-hued interior not border-connected: preserved"
+        )
+    }
+
+    @Test
+    fun `removeSmallIslands drops specks but keeps the sprite`() {
+        val img = BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB)
+        for (y in 20..44) for (x in 20..44) img.setRGB(x, y, Color.RED.rgb) // 625px sprite
+        img.setRGB(2, 2, Color.GREEN.rgb) // 1px speck
+        for (x in 50..52) img.setRGB(x, 5, Color.BLUE.rgb) // 3px speck
+
+        val result = SpriteSheetSplitter.removeSmallIslands(img, minArea = 16)
+
+        assertEquals(0, (result.getRGB(2, 2) ushr 24) and 0xFF, "1px speck removed")
+        assertEquals(0, (result.getRGB(51, 5) ushr 24) and 0xFF, "3px speck removed")
+        assertEquals(Color.RED.rgb, result.getRGB(30, 30), "Sprite body preserved")
+    }
+
+    @Test
+    fun `trimTransparent alphaThreshold ignores faint halo pixels`() {
+        val img = BufferedImage(10, 10, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until 10) for (x in 0 until 10) img.setRGB(x, y, 0x00000000)
+        for (y in 4..5) for (x in 4..5) img.setRGB(x, y, Color.RED.rgb)
+        img.setRGB(0, 0, (5 shl 24) or 0x00B140) // alpha-5 halo speck in the corner
+
+        val loose = SpriteSheetSplitter.trimTransparent(img)
+        val strict = SpriteSheetSplitter.trimTransparent(img, alphaThreshold = 16)
+
+        assertEquals(6, loose.trimmedWidth, "Default threshold includes the speck in the bbox")
+        assertEquals(2, strict.trimmedWidth, "Threshold 16 crops to the visible content")
+        assertEquals(2, strict.trimmedHeight)
+    }
 }
