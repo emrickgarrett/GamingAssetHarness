@@ -518,18 +518,31 @@ object SpriteSheetSplitter {
      * (already-transparent pixels provide connectivity), so key-hued colors
      * inside the sprite survive.
      *
+     * Additionally, ENCLOSED regions of strongly key-dominant pixels — e.g.
+     * the background showing through a ring's hole or between a pulley's
+     * ropes, which border-seeded flood fill can never reach — are removed by
+     * a global sweep at the stricter [enclosedThreshold]. The chroma key is
+     * always chosen to avoid the sprite's own palette, so strongly
+     * key-dominant pixels anywhere in the image are background; the higher
+     * bar protects mildly key-tinted sprite detail.
+     *
      * The original image is not modified.
      *
      * @param image the source image
      * @param bgColor the chroma key color (defines the dominance axis)
-     * @param keyThreshold minimum keyness for a pixel to count as background
-     *     (default 10 — small positive margin so neutral colors are safe)
+     * @param keyThreshold minimum keyness for a border-connected pixel to
+     *     count as background (default 10 — small positive margin so neutral
+     *     colors are safe)
+     * @param enclosedThreshold minimum keyness for a NON-border-connected
+     *     pixel to be removed by the global sweep (default 45; pass a value
+     *     > 255 to disable the sweep)
      * @return a new [BufferedImage] with the key-dominant background removed
      */
     fun removeBackgroundKeyness(
         image: BufferedImage,
         bgColor: Color,
-        keyThreshold: Int = 10
+        keyThreshold: Int = 10,
+        enclosedThreshold: Int = 45
     ): BufferedImage {
         val w = image.width
         val h = image.height
@@ -580,6 +593,21 @@ object SpriteSheetSplitter {
             if (x < w - 1) tryEnqueue(x + 1, y)
             if (y > 0) tryEnqueue(x, y - 1)
             if (y < h - 1) tryEnqueue(x, y + 1)
+        }
+
+        // Global sweep for enclosed background the border flood can't reach
+        // (ring holes, gaps between ropes): strongly key-dominant = background.
+        if (enclosedThreshold <= 255) {
+            for (y in 0 until h) {
+                for (x in 0 until w) {
+                    val rgb = copy.getRGB(x, y)
+                    if (((rgb ushr 24) and 0xFF) == 0) continue
+                    val r = (rgb ushr 16) and 0xFF
+                    val g = (rgb ushr 8) and 0xFF
+                    val b = rgb and 0xFF
+                    if (keyness(r, g, b) >= enclosedThreshold) copy.setRGB(x, y, 0x00000000)
+                }
+            }
         }
 
         return copy

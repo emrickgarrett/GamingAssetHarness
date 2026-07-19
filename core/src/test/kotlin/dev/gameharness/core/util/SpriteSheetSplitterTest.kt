@@ -725,13 +725,13 @@ class SpriteSheetSplitterTest {
     }
 
     @Test
-    fun `removeBackgroundKeyness spares key-hued pixels inside the sprite`() {
+    fun `removeBackgroundKeyness spares mildly key-hued enclosed detail`() {
         val green = Color(0x00, 0xB1, 0x40)
         val img = createTestImage(32, 32, green)
         val g = img.createGraphics()
         g.color = Color(10, 18, 32)
         g.fillRect(8, 8, 16, 16) // solid navy ring blocks connectivity
-        g.color = Color(0x20, 0xC8, 0x3C) // green-dominant interior detail
+        g.color = Color(0x50, 0x84, 0x62) // muted green-ish detail (keyness 34 < 45)
         g.fillRect(12, 12, 8, 8)
         g.dispose()
 
@@ -739,9 +739,26 @@ class SpriteSheetSplitterTest {
 
         assertEquals(0, (result.getRGB(2, 2) ushr 24) and 0xFF, "Background removed")
         assertEquals(
-            Color(0x20, 0xC8, 0x3C).rgb or (0xFF shl 24), result.getRGB(15, 15),
-            "Key-hued interior not border-connected: preserved"
+            Color(0x50, 0x84, 0x62).rgb or (0xFF shl 24), result.getRGB(15, 15),
+            "Mildly key-tinted enclosed detail preserved"
         )
+    }
+
+    @Test
+    fun `removeBackgroundKeyness removes strongly key-dominant enclosed background`() {
+        val green = Color(0x00, 0xB1, 0x40)
+        val img = createTestImage(32, 32, green)
+        val g = img.createGraphics()
+        g.color = Color(10, 18, 32)
+        g.fillRect(8, 8, 16, 16) // ring of navy
+        g.color = green // pure key trapped in the middle (e.g. a ring's hole)
+        g.fillRect(12, 12, 8, 8)
+        g.dispose()
+
+        val result = SpriteSheetSplitter.removeBackgroundKeyness(img, green)
+
+        assertEquals(0, (result.getRGB(15, 15) ushr 24) and 0xFF, "Enclosed key background removed")
+        assertEquals(Color(10, 18, 32).rgb or (0xFF shl 24), result.getRGB(9, 9), "Ring preserved")
     }
 
     @Test
