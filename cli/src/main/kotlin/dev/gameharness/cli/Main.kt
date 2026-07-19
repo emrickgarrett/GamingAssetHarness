@@ -2,6 +2,7 @@ package dev.gameharness.cli
 
 import com.github.ajalt.clikt.core.subcommands
 import dev.gameharness.cli.commands.ConfigShow
+import dev.gameharness.cli.commands.asset.AssetCleanup
 import dev.gameharness.cli.commands.asset.AssetCmd
 import dev.gameharness.cli.commands.asset.AssetList
 import dev.gameharness.cli.commands.asset.AssetRevise
@@ -29,7 +30,8 @@ fun main(args: Array<String>) {
             AssetCmd().subcommands(
                 AssetList(),
                 AssetRevise(),
-                AssetTrim()
+                AssetTrim(),
+                AssetCleanup()
             ),
             ConfigShow()
         )

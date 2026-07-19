@@ -368,8 +368,355 @@ object SpriteSheetSplitter {
     }
 
     /**
+     * Removes residual chroma key contamination from the edge region of a sprite
+     * whose background has already been removed (e.g., by [removeBackgroundFloodFill]).
+     *
+     * Anti-aliased boundary pixels are a blend of sprite color and background
+     * color. Threshold-based approaches ([removeBackgroundColor], [defringeEdges])
+     * either miss blends that are mostly sprite or erode genuine sprite pixels.
+     * This method instead measures each pixel's *key-color excess* — how dominant
+     * the chroma key's characteristic channel(s) are relative to the others — and
+     * treats that excess as the fraction of background mixed into the pixel:
+     *
+     * 1. A depth map is built via BFS from all fully transparent pixels; only
+     *    pixels within [maxDepth] of transparency are considered (sprite interior
+     *    colors are never touched, even if key-like).
+     * 2. For each such pixel, keyness k = dominant-channel excess (for a green
+     *    key: `g - max(r, b)`; magenta: `min(r, b) - g`; blue: `b - max(r, g)`),
+     *    derived automatically from [bgColor]'s channel profile.
+     * 3. Contamination `t = k / keyness(bgColor)` (clamped to 0..1) is removed:
+     *    alpha is scaled by `1 - t` and the color is un-mixed by subtracting the
+     *    background contribution (`c' = (c - bg*t) / (1 - t)`).
+     *
+     * Pixels with no key-color excess (k ≤ 0) pass through unchanged, so dark
+     * outlines and neutral colors at the sprite boundary are preserved.
+     *
+     * The original image is not modified.
+     *
+     * @param image the source image (typically output of [removeBackgroundFloodFill])
+     * @param bgColor the chroma key color that was removed
+     * @param maxDepth how many pixels in from transparency to examine (default 4;
+     *     use larger values for high-resolution images with wide anti-aliasing)
+     * @return a new [BufferedImage] with key contamination removed from edges
+     */
+    fun decontaminateEdges(
+        image: BufferedImage,
+        bgColor: Color,
+        maxDepth: Int = 4
+    ): BufferedImage {
+        val w = image.width
+        val h = image.height
+        val copy = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                copy.setRGB(x, y, image.getRGB(x, y))
+            }
+        }
+
+        val keyness = keynessOf(bgColor) ?: return copy // gray-ish key: no dominance axis
+        val bgKeyness = keyness(bgColor.red, bgColor.green, bgColor.blue)
+        if (bgKeyness <= 0) return copy
+
+        // BFS depth map from all fully transparent pixels
+        val depth = IntArray(w * h) { Int.MAX_VALUE }
+        val queue = ArrayDeque<Int>()
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                if (((image.getRGB(x, y) ushr 24) and 0xFF) == 0) {
+                    depth[y * w + x] = 0
+                    queue.addLast(y * w + x)
+                }
+            }
+        }
+        while (queue.isNotEmpty()) {
+            val idx = queue.removeFirst()
+            val d = depth[idx]
+            if (d >= maxDepth) continue
+            val x = idx % w
+            val y = idx / w
+            for ((nx, ny) in listOf(x - 1 to y, x + 1 to y, x to y - 1, x to y + 1)) {
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+                val nIdx = ny * w + nx
+                if (depth[nIdx] > d + 1) {
+                    depth[nIdx] = d + 1
+                    queue.addLast(nIdx)
+                }
+            }
+        }
+
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val idx = y * w + x
+                if (depth[idx] == 0 || depth[idx] > maxDepth) continue
+                val rgb = image.getRGB(x, y)
+                val a = (rgb ushr 24) and 0xFF
+                if (a == 0) continue
+                val r = (rgb ushr 16) and 0xFF
+                val g = (rgb ushr 8) and 0xFF
+                val b = rgb and 0xFF
+                val k = keyness(r, g, b)
+                if (k <= 0) continue
+
+                val t = (k.toDouble() / bgKeyness).coerceIn(0.0, 1.0)
+                val newAlpha = (a * (1.0 - t)).toInt()
+                if (newAlpha < 8) {
+                    copy.setRGB(x, y, 0x00000000)
+                    continue
+                }
+                // Un-mix the background contribution from the color
+                val inv = 1.0 - t
+                val nr = ((r - bgColor.red * t) / inv).toInt().coerceIn(0, 255)
+                val ng = ((g - bgColor.green * t) / inv).toInt().coerceIn(0, 255)
+                val nb = ((b - bgColor.blue * t) / inv).toInt().coerceIn(0, 255)
+                copy.setRGB(x, y, (newAlpha shl 24) or (nr shl 16) or (ng shl 8) or nb)
+            }
+        }
+
+        return copy
+    }
+
+    /**
+     * Derives a "keyness" function from a chroma key color's channel profile:
+     * channels >= 128 are "high" (characteristic of the key), the rest "low",
+     * and keyness(p) = min(high channels) - max(low channels).
+     *
+     * A pixel with positive keyness is dominated by the key hue (background or
+     * background-contaminated); sprite colors that don't share the key's channel
+     * signature — including dark outlines and neutral grays — score <= 0 and are
+     * structurally immune, no matter how far the rendered background drifted
+     * from the exact key hex.
+     *
+     * @return the keyness function, or null for a gray-ish key with no
+     *     dominance axis (all channels on the same side of 128)
+     */
+    private fun keynessOf(bgColor: Color): ((Int, Int, Int) -> Int)? {
+        val bgChannels = intArrayOf(bgColor.red, bgColor.green, bgColor.blue)
+        val high = (0..2).filter { bgChannels[it] >= 128 }
+        val low = (0..2).filter { bgChannels[it] < 128 }
+        if (high.isEmpty() || low.isEmpty()) return null
+        return { r, g, b ->
+            val c = intArrayOf(r, g, b)
+            high.minOf { c[it] } - low.maxOf { c[it] }
+        }
+    }
+
+    /**
+     * Removes the chroma key background using flood-fill from the image borders,
+     * where "background" is decided by *key-channel dominance* rather than color
+     * distance.
+     *
+     * [removeBackgroundFloodFill] compares each pixel to an exact key color
+     * within a tolerance — which fails when the image model renders an off-key
+     * background (too far from the requested hex to match), and can't be fixed
+     * by raising the tolerance without swallowing dark sprite outlines that sit
+     * close to blend colors. This variant instead asks whether the key's
+     * characteristic channel(s) dominate the pixel (see [keynessOf]): a drifted
+     * magenta like #92159d is still magenta-dominant, while a navy outline never
+     * is.
+     *
+     * Only border-connected pixels with keyness >= [keyThreshold] are removed
+     * (already-transparent pixels provide connectivity), so key-hued colors
+     * inside the sprite survive.
+     *
+     * The original image is not modified.
+     *
+     * @param image the source image
+     * @param bgColor the chroma key color (defines the dominance axis)
+     * @param keyThreshold minimum keyness for a pixel to count as background
+     *     (default 10 — small positive margin so neutral colors are safe)
+     * @return a new [BufferedImage] with the key-dominant background removed
+     */
+    fun removeBackgroundKeyness(
+        image: BufferedImage,
+        bgColor: Color,
+        keyThreshold: Int = 10
+    ): BufferedImage {
+        val w = image.width
+        val h = image.height
+        val copy = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                copy.setRGB(x, y, image.getRGB(x, y))
+            }
+        }
+
+        val keyness = keynessOf(bgColor) ?: return copy
+        val visited = BooleanArray(w * h)
+        val queue = ArrayDeque<Int>()
+
+        fun matchesBg(x: Int, y: Int): Boolean {
+            val rgb = image.getRGB(x, y)
+            val a = (rgb ushr 24) and 0xFF
+            if (a == 0) return true // Already transparent: connectivity only
+            val r = (rgb ushr 16) and 0xFF
+            val g = (rgb ushr 8) and 0xFF
+            val b = rgb and 0xFF
+            return keyness(r, g, b) >= keyThreshold
+        }
+
+        fun tryEnqueue(x: Int, y: Int) {
+            val idx = y * w + x
+            if (!visited[idx] && matchesBg(x, y)) {
+                visited[idx] = true
+                queue.addLast(idx)
+            }
+        }
+
+        for (x in 0 until w) {
+            tryEnqueue(x, 0)
+            tryEnqueue(x, h - 1)
+        }
+        for (y in 1 until h - 1) {
+            tryEnqueue(0, y)
+            tryEnqueue(w - 1, y)
+        }
+
+        while (queue.isNotEmpty()) {
+            val idx = queue.removeFirst()
+            val x = idx % w
+            val y = idx / w
+            copy.setRGB(x, y, 0x00000000)
+            if (x > 0) tryEnqueue(x - 1, y)
+            if (x < w - 1) tryEnqueue(x + 1, y)
+            if (y > 0) tryEnqueue(x, y - 1)
+            if (y < h - 1) tryEnqueue(x, y + 1)
+        }
+
+        return copy
+    }
+
+    /**
+     * Estimates the actual background color of a chroma-keyed image by sampling
+     * the border ring and averaging pixels that resemble [expected].
+     *
+     * Image models don't always render the requested key hex exactly — an
+     * off-key background (e.g. #c32acc instead of #ff00ff) can exceed the
+     * flood-fill tolerance and survive removal entirely. Feeding the *measured*
+     * border color into [removeBackgroundFloodFill] makes removal robust to
+     * that drift.
+     *
+     * Only strongly key-dominant border pixels (keyness >= 30, see [keynessOf])
+     * are sampled, so dark sprite/background blend pixels can't drag the
+     * estimate toward the sprite's own palette.
+     *
+     * @param image the source image
+     * @param expected the requested chroma key color (defines the dominance axis)
+     * @param ringWidth how many border pixel rows/columns to sample (default 2)
+     * @return the average border background color, or null if too few opaque
+     *     border pixels resemble the key (background already removed or absent)
+     */
+    fun estimateBorderColor(
+        image: BufferedImage,
+        expected: Color,
+        ringWidth: Int = 2
+    ): Color? {
+        val keyness = keynessOf(expected) ?: return null
+        val w = image.width
+        val h = image.height
+        var count = 0
+        var sumR = 0L
+        var sumG = 0L
+        var sumB = 0L
+
+        fun sample(x: Int, y: Int) {
+            val rgb = image.getRGB(x, y)
+            val a = (rgb ushr 24) and 0xFF
+            if (a < 128) return
+            val r = (rgb ushr 16) and 0xFF
+            val g = (rgb ushr 8) and 0xFF
+            val b = rgb and 0xFF
+            if (keyness(r, g, b) >= 30) {
+                count++
+                sumR += r
+                sumG += g
+                sumB += b
+            }
+        }
+
+        for (d in 0 until ringWidth.coerceAtMost(minOf(w, h) / 2)) {
+            for (x in 0 until w) {
+                sample(x, d)
+                sample(x, h - 1 - d)
+            }
+            for (y in 1 until h - 1) {
+                sample(d, y)
+                sample(w - 1 - d, y)
+            }
+        }
+
+        if (count < 32) return null
+        return Color((sumR / count).toInt(), (sumG / count).toInt(), (sumB / count).toInt())
+    }
+
+    /**
+     * Removes small disconnected islands of non-transparent pixels — orphaned
+     * background fragments, blend-noise specks, and stray dots left behind by
+     * imperfect chroma key removal.
+     *
+     * Connected components (4-connectivity over pixels with alpha > 0) whose
+     * pixel count is below [minArea] are made fully transparent. The sprite
+     * itself and any intentionally separate large elements are far above any
+     * sensible threshold.
+     *
+     * The original image is not modified.
+     *
+     * @param image the source image
+     * @param minArea components smaller than this many pixels are removed
+     * @return a new [BufferedImage] with small islands removed
+     */
+    fun removeSmallIslands(image: BufferedImage, minArea: Int): BufferedImage {
+        val w = image.width
+        val h = image.height
+        val copy = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                copy.setRGB(x, y, image.getRGB(x, y))
+            }
+        }
+
+        val labeled = BooleanArray(w * h)
+        val component = ArrayDeque<Int>()
+        val queue = ArrayDeque<Int>()
+
+        fun isOpaque(idx: Int): Boolean =
+            ((image.getRGB(idx % w, idx / w) ushr 24) and 0xFF) > 0
+
+        for (start in 0 until w * h) {
+            if (labeled[start] || !isOpaque(start)) continue
+            component.clear()
+            queue.clear()
+            labeled[start] = true
+            queue.addLast(start)
+            while (queue.isNotEmpty()) {
+                val idx = queue.removeFirst()
+                component.addLast(idx)
+                val x = idx % w
+                val y = idx / w
+                for (nIdx in intArrayOf(
+                    if (x > 0) idx - 1 else -1,
+                    if (x < w - 1) idx + 1 else -1,
+                    if (y > 0) idx - w else -1,
+                    if (y < h - 1) idx + w else -1
+                )) {
+                    if (nIdx >= 0 && !labeled[nIdx] && isOpaque(nIdx)) {
+                        labeled[nIdx] = true
+                        queue.addLast(nIdx)
+                    }
+                }
+            }
+            if (component.size < minArea) {
+                for (idx in component) {
+                    copy.setRGB(idx % w, idx / w, 0x00000000)
+                }
+            }
+        }
+
+        return copy
+    }
+
+    /**
      * Trims transparent borders from a sprite image by cropping to the bounding
-     * box of all non-transparent (alpha > 0) pixels.
+     * box of all non-transparent pixels (alpha >= [alphaThreshold]).
      *
      * If the image is fully transparent, returns a 1×1 transparent image.
      * If no transparent borders exist, returns a copy of the original with
@@ -378,9 +725,12 @@ object SpriteSheetSplitter {
      * The original image is not modified.
      *
      * @param image the source image to trim
+     * @param alphaThreshold minimum alpha (1–255, default 1) for a pixel to count
+     *     as content; higher values ignore near-invisible halo pixels so they
+     *     don't inflate the bounding box
      * @return a [TrimResult] with the trimmed image and metadata
      */
-    fun trimTransparent(image: BufferedImage): TrimResult {
+    fun trimTransparent(image: BufferedImage, alphaThreshold: Int = 1): TrimResult {
         val w = image.width
         val h = image.height
 
@@ -393,7 +743,7 @@ object SpriteSheetSplitter {
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val alpha = (image.getRGB(x, y) ushr 24) and 0xFF
-                if (alpha > 0) {
+                if (alpha >= alphaThreshold) {
                     if (x < minX) minX = x
                     if (x > maxX) maxX = x
                     if (y < minY) minY = y
