@@ -15,7 +15,7 @@ Game Developer Harness acts as an intelligent assistant for game asset creation.
 | Asset | Format | Powered By |
 |-------|--------|------------|
 | 2D Sprites & Textures | PNG, WebP | NanoBanana (Google Gemini) |
-| 3D Models | GLB | Meshy |
+| 3D Models | GLB, FBX, OBJ | Meshy |
 | Music Tracks | MP3 | Suno |
 | Sound Effects | MP3 | ElevenLabs |
 
@@ -28,6 +28,8 @@ The agent adapts to your setup — only the services you configure will be avail
 - **Workspace instructions** — set persistent per-workspace context (art style, format preferences, project guidelines) that the AI follows across all sessions
 - **Automatic transparent backgrounds** — sprites are generated with a chroma key background that is automatically removed via flood-fill and multi-pass edge de-fringing to produce clean transparency. The chroma key color is intelligently selected based on sprite content (green by default, magenta for nature/green sprites, blue when both conflict)
 - **NanoBanana model selection** — choose between Nano Banana, Nano Banana 2, or Nano Banana Pro for 2D generation
+- **Image-to-3D conversion** — turn 2D concept art into 3D models by providing an image URL
+- **3D format selection** — export 3D models as GLB, FBX, or OBJ
 - **Multi-service integration** — generate 2D, 3D, music, and audio from a single interface
 - **Progress tracking** — real-time progress for long-running generations (3D models, music)
 - **Asset management** — approve, deny (with feedback), or delete generated assets
@@ -40,6 +42,8 @@ The agent adapts to your setup — only the services you configure will be avail
 
 - **JDK 21** or later
 - **API Keys** (see [API Keys](#api-keys) below)
+- *Optional, only for procedural 3D models:* **Python 3.10+** and **Node 18+**
+  (see [Procedural 3D models](#procedural-3d-models-img2threejs))
 
 ## Quick Start
 
@@ -338,3 +342,75 @@ The agent only offers asset types for which you've configured API keys. Check Se
 ## License
 
 MIT
+
+## Procedural 3D models (img2threejs)
+
+A second route to 3D, alongside Meshy. Where Meshy generates a **mesh** from an
+image, [img2threejs](https://github.com/img2threejs/img2threejs) (Apache-2.0)
+rebuilds the object as **procedural Three.js code** — animation-ready and
+editable, rather than a baked surface.
+
+It is not an API provider, and deliberately does not sit under `generate`.
+It is an agent-driven pipeline of eight gated passes
+(blockout → structural → form → material → surface → lighting → interaction →
+optimization). Python scripts enforce the gates and own pipeline state; a
+vision-capable agent authors the sculpt spec and scores each
+reference-vs-render comparison sheet. Its own docs put it as *"scripts enforce,
+the model judges."*
+
+### Setup
+
+```sh
+git clone https://github.com/img2threejs/img2threejs third_party/img2threejs
+(cd tools/threejs-bake && npm install)   # three + tsx, for the GLB bake
+```
+
+The checkout is resolved from `--forge`, then `IMG2THREEJS_PATH`, then by
+walking up for `third_party/img2threejs`. Both directories are gitignored:
+the checkout is a pinned upstream tool, not our source.
+
+### Commands
+
+| Command | Purpose |
+|---|---|
+| `sculpt init -w <ws> -i <image> -n <name>` | Validate the reference, scaffold a session in the workspace |
+| `sculpt next -s <spec>` | Current pass, exact next command, unmet acceptance criteria |
+| `sculpt run <script> [args]` | Run any forge script (usually whatever `next` reported) |
+| `sculpt bake -w <ws> -s <spec> --factory <ts>` | Bake the factory to `.glb` and register it as an asset |
+| `sculpt render -m <glb> -o <dir>` | Screenshot the model from several angles for a pass's review gate |
+
+### Why bake to GLB
+
+The pipeline emits TypeScript, which the asset viewer cannot render and other
+engines cannot load. `sculpt bake` runs the factory headlessly and exports a
+`.glb`, so the factory stays the editable master while the mesh is portable.
+The result is registered as an ordinary `MODEL_3D` asset — the existing
+viewer and every asset command work on it with no special-casing, and
+provenance (spec, factory, provider) is recorded in `generationParams`.
+
+### Rendering for the review gates
+
+Passes 2-8 each gate on a **rendered screenshot** compared against the reference
+image, and the forge scripts deliberately ship no renderer (stdlib-only Python).
+`sculpt render` fills that in using the harness's own GLB viewer, so a review
+shot and the asset window show the same thing:
+
+```bash
+harness sculpt render -m assets/models/sculpt/rum-barrel-sculpt.glb -o sculpts/rum-barrel/review
+```
+
+By default it shoots four angles (three-quarter, front, side, top) into the
+output directory; pass `--angles 35:20` for a single named file, or any
+comma-separated `azimuth:elevation` list. `--size` sets the square resolution.
+
+Under the hood this runs `dev.gameharness.gui.viewer3d.OffscreenRenderer`: a
+hidden GLFW window owning an OpenGL 3.3 context, drawing into an off-screen
+framebuffer. It needs a display server, so it works on a desktop but not on a
+bare headless CI box (that would want EGL/OSMesa).
+
+The renderer lives in `:gui` but the CLI does not depend on that module — the
+CLI is deliberately lean, and pulling in Compose Desktop for a screenshot would
+be a poor trade. Instead the gui build publishes its runtime classpath
+(`:gui:renderClasspath` → `gui/build/renderer-classpath.txt`) and `sculpt render`
+spawns a plain JVM against it. Any gui build refreshes that file; if it is
+missing, `sculpt render` says so and names the task to run.

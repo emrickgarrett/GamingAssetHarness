@@ -10,6 +10,9 @@ datetime = "0.6.2"
 slf4j = "2.0.16"
 logback = "1.5.16"
 clikt = "4.4.0"
+lwjgl = "3.3.6"
+lwjgl3-awt = "0.2.3"
+jgltf = "2.0.4"
 
 [libraries]
 koog-agents = { module = "ai.koog:koog-agents", version.ref = "koog" }
@@ -30,6 +33,14 @@ slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
+
+lwjgl = { module = "org.lwjgl:lwjgl", version.ref = "lwjgl" }
+lwjgl-opengl = { module = "org.lwjgl:lwjgl-opengl", version.ref = "lwjgl" }
+# GLFW is only used for the OFFSCREEN render context (hidden window + FBO) that
+# produces sculpt review screenshots; the interactive viewer still uses AWT.
+lwjgl-glfw = { module = "org.lwjgl:lwjgl-glfw", version.ref = "lwjgl" }
+lwjgl3-awt = { module = "org.lwjglx:lwjgl3-awt", version.ref = "lwjgl3-awt" }
+jgltf-model = { module = "de.javagl:jgltf-model", version.ref = "jgltf" }
 
 junit5-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit5" }
 junit5-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit5" }

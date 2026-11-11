@@ -163,57 +163,10 @@ internal fun AudioPreview(filePath: String, assetType: AssetType, modifier: Modi
     }
 }
 
-/** Renders a 3D model info card with file name, size, and format badge. */
+/** Renders a 3D model with an interactive OpenGL viewer. Falls back to info card on error. */
 @Composable
 internal fun ModelPreview(filePath: String, modifier: Modifier = Modifier) {
-    val file = File(filePath)
-
-    Box(
-        modifier = modifier.fillMaxWidth()
-            .background(
-                MaterialTheme.colorScheme.surfaceVariant,
-                RoundedCornerShape(8.dp)
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(24.dp)
-        ) {
-            Text(
-                text = "\uD83E\uDDF1",
-                style = MaterialTheme.typography.displayMedium
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = file.name,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (file.exists()) {
-                Spacer(Modifier.height(4.dp))
-                val sizeKb = file.length() / 1024
-                val sizeDisplay = if (sizeKb > 1024) "${"%.1f".format(sizeKb / 1024.0)} MB" else "$sizeKb KB"
-                Text(
-                    text = sizeDisplay,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "GLB",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.secondary
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "Open in a 3D viewer to inspect the model",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-            )
-        }
-    }
+    dev.gameharness.gui.viewer3d.ModelViewer(filePath, modifier)
 }
 
 /** Renders a generic file info card for unsupported asset types. */

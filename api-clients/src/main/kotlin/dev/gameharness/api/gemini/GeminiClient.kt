@@ -152,6 +152,17 @@ class GeminiClient(
         return GenerationResult.Completed(asset, bytes)
     }
 
+    private fun isPixelStyle(style: String) = style == "8bit" || style == "16bit"
+
+    /** Only the pixel styles should ask for pixel art; "modern"/"realistic" must not. */
+    private fun styleClause(style: String): String = when (style) {
+        "8bit" -> "Style: 8-bit pixel art. "
+        "16bit" -> "Style: 16-bit pixel art. "
+        "modern" -> "Style: modern 2D digital illustration with smooth lineart and shading. NOT pixel art, no visible pixels. "
+        "realistic" -> "Style: realistic, detailed digital painting with smooth shading. NOT pixel art, no visible pixels. "
+        else -> "Style: $style. "
+    }
+
     private fun buildPrompt(request: GenerationRequest, chromaKey: ChromaKeyConfig?): String {
         val style = request.params["style"] ?: "16bit"
         val aspectRatio = request.params["aspectRatio"] ?: "1:1"
@@ -166,7 +177,7 @@ class GeminiClient(
             } else {
                 append("Generate a game sprite: ${request.description}. ")
             }
-            append("Style: $style pixel art. ")
+            append(styleClause(style))
             append("Aspect ratio: $aspectRatio. ")
             if (width != null && height != null) {
                 append("Image dimensions: ${width}x${height} pixels. ")
@@ -181,7 +192,7 @@ class GeminiClient(
                     "(hex ${chromaKey.hex}). Every single background pixel must be EXACTLY this color " +
                     "with NO variation. NO noise, NO texture, NO gradients, NO shading, NO shadows, " +
                     "NO dark areas in the background. The sprite must have sharp, clean, hard edges " +
-                    "against the ${chromaKey.name} background with NO anti-aliasing, NO feathering, and NO color " +
+                    "against the ${chromaKey.name} background with ${if (isPixelStyle(style)) "NO anti-aliasing, " else ""}NO feathering, and NO color " +
                     "bleeding between the sprite and the background. Think of this as a chroma key " +
                     "screen — the background must be perfectly uniform for automated removal. "
                 )

@@ -25,18 +25,27 @@ class ModelGeneratorTool(
 ) : SimpleTool<ModelGeneratorTool.Args>(
     argsSerializer = Args.serializer(),
     name = "generate_3d_model",
-    description = "Generate a 3D game model using AI. Produces GLB files with PBR textures. Takes several minutes to complete."
+    description = "Generate a 3D game model using AI. Produces GLB/FBX/OBJ files with PBR textures. Supports text-to-3D and image-to-3D conversion. Takes several minutes to complete."
 ) {
     @Serializable
     data class Args(
         @property:LLMDescription("Detailed description of the 3D model to generate, e.g. 'a low-poly medieval castle' or 'a sci-fi laser gun'")
         val description: String,
         @property:LLMDescription("Art style: 'realistic', 'cartoon', 'low-poly', or 'sculpture'. Default: 'realistic'")
-        val artStyle: String = "realistic"
+        val artStyle: String = "realistic",
+        @property:LLMDescription("Output format: 'glb', 'fbx', or 'obj'. Default: 'glb'")
+        val format: String = "glb",
+        @property:LLMDescription("URL of an image to convert to a 3D model. When provided, generates from the image instead of text description.")
+        val imageUrl: String? = null
     ) {
         init {
             require(description.isNotBlank()) { "Description must not be blank" }
+            require(format in VALID_FORMATS) { "Format must be one of: ${VALID_FORMATS.joinToString()}" }
         }
+    }
+
+    companion object {
+        val VALID_FORMATS = setOf("glb", "fbx", "obj")
     }
 
     /** Generates a 3D model, saves it to the workspace, and returns a status string for the LLM. */
@@ -44,7 +53,11 @@ class ModelGeneratorTool(
         val request = GenerationRequest(
             description = args.description,
             type = AssetType.MODEL_3D,
-            params = mapOf("artStyle" to args.artStyle)
+            params = buildMap {
+                put("artStyle", args.artStyle)
+                put("format", args.format)
+                if (args.imageUrl != null) put("imageUrl", args.imageUrl)
+            }
         )
 
         meshyClient.onProgress = { percent, message ->
@@ -57,7 +70,7 @@ class ModelGeneratorTool(
                     val (savedPath, updatedWs) = workspaceManager.saveAsset(currentWorkspace(), result.asset, result.fileBytes)
                     onWorkspaceUpdated(updatedWs)
                     "Successfully generated 3D model '${args.description}'. " +
-                        "Saved as ${result.asset.fileName} (${result.asset.sizeBytes} bytes, GLB format). " +
+                        "Saved as ${result.asset.fileName} (${result.asset.sizeBytes} bytes, ${args.format.uppercase()} format). " +
                         "Asset ID: ${result.asset.id}. File: $savedPath"
                 }
                 is GenerationResult.Failed -> "Failed to generate 3D model: ${result.error}"

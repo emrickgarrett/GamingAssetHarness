@@ -5,6 +5,7 @@ import com.github.ajalt.clikt.core.requireObject
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
+import com.github.ajalt.clikt.parameters.types.choice
 import dev.gameharness.api.common.ApiException
 import dev.gameharness.cli.*
 import dev.gameharness.core.model.AssetDecision
@@ -19,6 +20,10 @@ class GenerateModel : CliktCommand(name = "model") {
     private val workspace by option("-w", "--workspace", help = "Workspace name").required()
     private val description by option("-d", "--description", help = "Model description").required()
     private val artStyle by option("--art-style", help = "Art style: realistic, cartoon, low-poly, sculpture").default("realistic")
+    private val format by option("--format", help = "Output format: glb, fbx, obj").default("glb")
+    private val poseMode by option("--pose-mode", help = "Character pose: t-pose or a-pose (use t-pose for anything to be rigged)")
+        .choice("t-pose", "a-pose")
+    private val image by option("-i", "--image", help = "Image URL for image-to-3D conversion")
     private val folder by option("-f", "--folder", help = "Virtual folder within workspace").default("")
 
     override fun run() {
@@ -40,7 +45,12 @@ class GenerateModel : CliktCommand(name = "model") {
             val request = GenerationRequest(
                 description = description,
                 type = AssetType.MODEL_3D,
-                params = mapOf("artStyle" to artStyle)
+                params = buildMap {
+                    put("artStyle", artStyle)
+                    put("format", format)
+                    poseMode?.let { put("poseMode", it) }
+                    if (image != null) put("imageUrl", image!!)
+                }
             )
 
             val result = runBlocking { client.generate(request) }

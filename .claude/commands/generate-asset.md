@@ -77,6 +77,12 @@ Based on the user's request, determine the asset type and run the appropriate co
 ./gradlew :cli:run --args="generate model -w '<workspace-name>' -d '<detailed description>' --art-style '<style>'" -q
 ```
 - Styles: `realistic` (default), `cartoon`, `low-poly`, `sculpture`
+- Output format (--format): `glb` (default), `fbx`, `obj`
+- Characters (--pose-mode): **always pass `--pose-mode t-pose` for any character that will be rigged or animated**, and say "standing in a T-pose with both arms held straight out to the sides" in the description. Without it Meshy poses the character however it likes: arms left hanging by the body get fused to the torso and the auto-rig ties arm skin to the torso and thighs, which stretches badly once animated. `a-pose` exists but is not recommended. Leave the option off for props and creatures without arms.
+- Image-to-3D (--image): provide a URL to a 2D image to convert it into a 3D model instead of generating from text description
+  ```bash
+  ./gradlew :cli:run --args="generate model -w '<workspace-name>' -d '<description>' --image '<image-url>'" -q
+  ```
 
 ### Music (slow, ~1-3min)
 ```bash

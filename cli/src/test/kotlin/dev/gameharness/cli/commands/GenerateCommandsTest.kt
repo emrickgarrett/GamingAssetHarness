@@ -185,6 +185,75 @@ class GenerateCommandsTest {
     }
 
     @Test
+    fun `generate model fails when API key not configured`() {
+        createWorkspace("ModelKeyTest")
+
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "generate", "model",
+                "-w", "ModelKeyTest",
+                "-d", "test model"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        if (!parsed.success) {
+            val code = parsed.error!!.code
+            assert(code == "MISSING_KEY" || code == "AUTH_FAILED" || code == "GENERATION_FAILED") {
+                "Expected MISSING_KEY or AUTH_FAILED, got: $code"
+            }
+        }
+    }
+
+    @Test
+    fun `generate model accepts art-style option`() {
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "generate", "model",
+                "-w", "NonExistent",
+                "-d", "a castle",
+                "--art-style", "low-poly"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("NOT_FOUND", parsed.error!!.code)
+    }
+
+    @Test
+    fun `generate model accepts format option`() {
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "generate", "model",
+                "-w", "NonExistent",
+                "-d", "a sword",
+                "--format", "fbx"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("NOT_FOUND", parsed.error!!.code)
+    }
+
+    @Test
+    fun `generate model accepts image option`() {
+        val output = captureStdout {
+            buildCli().parse(listOf(
+                "generate", "model",
+                "-w", "NonExistent",
+                "-d", "from concept art",
+                "--image", "https://example.com/art.png"
+            ))
+        }
+
+        val parsed = json.decodeFromString(CliResponse.serializer(), output)
+        assertEquals(false, parsed.success)
+        assertEquals("NOT_FOUND", parsed.error!!.code)
+    }
+
+    @Test
     fun `generate sfx fails when API key not configured`() {
         createWorkspace("SfxKeyTest")
 

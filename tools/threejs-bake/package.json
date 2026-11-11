@@ -1,0 +1,14 @@
+{
+  "name": "gameharness-threejs-bake",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Headless GLB bake for img2threejs procedural factories — see bake.mjs",
+  "scripts": {
+    "bake": "tsx bake.mjs"
+  },
+  "dependencies": {
+    "three": "^0.180.0",
+    "tsx": "^4.23.1"
+  }
+}

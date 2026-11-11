@@ -5,7 +5,7 @@ import dev.gameharness.core.config.AppConfig
 /** Human-readable descriptions for each generation tool, keyed by tool name. */
 private val TOOL_DESCRIPTIONS = mapOf(
     "generate_sprite" to "Create 2D game sprites (pixel art: 8bit, 16bit; or modern, realistic styles) as PNG files. Supports reference images when attached by the user.",
-    "generate_3d_model" to "Create 3D game models in GLB format with PBR textures",
+    "generate_3d_model" to "Create 3D game models in GLB/FBX/OBJ format with PBR textures. Supports text-to-3D and image-to-3D conversion",
     "generate_music" to "Create game music tracks as MP3 files",
     "generate_sound_effect" to "Create game sound effects as MP3 files"
 )

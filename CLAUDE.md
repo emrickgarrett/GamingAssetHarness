@@ -58,7 +58,7 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 |---------|-----------|-----------------|----------|
 | **OpenRouter** | LLM reasoning (agent brain) | `OPENROUTER_API_KEY` | OpenRouter API (routes to Claude 4.5 Sonnet) |
 | **NanoBanana (Gemini)** | 2D Sprites/Textures | `GEMINI_API_KEY` | `generativelanguage.googleapis.com/v1beta/models/{model}` |
-| **Meshy** | 3D Models (GLB) | `MESHY_API_KEY` | `api.meshy.ai` (2-stage: preview then refine) |
+| **Meshy** | 3D Models (GLB/FBX/OBJ) | `MESHY_API_KEY` | `api.meshy.ai` (text-to-3D: 2-stage preview+refine; image-to-3D: single-stage) |
 | **Suno** | Music (MP3) | `SUNO_API_KEY` | Suno API (create + poll until complete) |
 | **ElevenLabs** | Sound Effects (MP3) | `ELEVENLABS_API_KEY` | `api.elevenlabs.io/v1/sound-generation` |
 
@@ -191,6 +191,15 @@ Requires JDK 21 with `JAVA_HOME` set. Use `-q` flag for clean JSON output.
 
 # Generate a 3D model (slow, 5-10 min)
 ./gradlew :cli:run --args="generate model -w 'MyGame' -d 'a wooden treasure chest' --art-style low-poly" -q
+
+# Generate a 3D character for rigging: always in a T-pose (see --pose-mode in generate-asset.md)
+./gradlew :cli:run --args="generate model -w 'MyGame' -d 'a knight in plate armour, standing in a T-pose with both arms held straight out to the sides' --pose-mode t-pose" -q
+
+# Generate a 3D model in FBX format
+./gradlew :cli:run --args="generate model -w 'MyGame' -d 'a sci-fi crate' --format fbx" -q
+
+# Generate a 3D model from an image (image-to-3D)
+./gradlew :cli:run --args="generate model -w 'MyGame' -d 'from concept art' --image 'https://example.com/concept.png'" -q
 
 # Generate music (slow, 1-3 min)
 ./gradlew :cli:run --args="generate music -w 'MyGame' -d 'epic battle theme' --genre orchestral --mood epic" -q

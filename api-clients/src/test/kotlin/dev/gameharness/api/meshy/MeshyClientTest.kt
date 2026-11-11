@@ -126,4 +126,111 @@ class MeshyClientTest {
             client.generate(request)
         }
     }
+
+    @Test
+    fun `downloads fbx format when requested`() = runTest {
+        var pollCount = 0
+        var downloadedUrl: String? = null
+        val mockClient = HttpClient(MockEngine { request ->
+            val url = request.url.toString()
+            when {
+                request.method == HttpMethod.Post -> respond(
+                    content = loadResource("meshy-create-response.json"),
+                    headers = jsonHeaders()
+                )
+                url.contains("assets.meshy.ai") -> {
+                    downloadedUrl = url
+                    respond(
+                        content = ByteArray(64),
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.OctetStream.toString())
+                    )
+                }
+                else -> {
+                    pollCount++
+                    if (pollCount <= 1) {
+                        respond(content = loadResource("meshy-task-pending.json"), headers = jsonHeaders())
+                    } else {
+                        respond(content = loadResource("meshy-task-succeeded.json"), headers = jsonHeaders())
+                    }
+                }
+            }
+        }) {
+            install(ContentNegotiation) {
+                json(Json { ignoreUnknownKeys = true; encodeDefaults = true; isLenient = true })
+            }
+        }
+
+        val client = MeshyClient(
+            apiKey = "test-key",
+            httpClient = mockClient,
+            pollInterval = 10.milliseconds,
+            maxPollDuration = 5000.milliseconds
+        )
+        val request = GenerationRequest(
+            description = "a sword",
+            type = AssetType.MODEL_3D,
+            params = mapOf("format" to "fbx")
+        )
+
+        val result = client.generate(request)
+        assertIs<GenerationResult.Completed>(result)
+        assertTrue(result.asset.format == "fbx")
+        assertTrue(result.asset.fileName.endsWith(".fbx"))
+        assertTrue(downloadedUrl?.contains("model.fbx") == true)
+    }
+
+    @Test
+    fun `generates model from image url`() = runTest {
+        var pollCount = 0
+        var postedToImageEndpoint = false
+        val mockClient = HttpClient(MockEngine { request ->
+            val url = request.url.toString()
+            when {
+                request.method == HttpMethod.Post && url.contains("image-to-3d") -> {
+                    postedToImageEndpoint = true
+                    respond(
+                        content = loadResource("meshy-image-create-response.json"),
+                        headers = jsonHeaders()
+                    )
+                }
+                request.method == HttpMethod.Post -> respond(
+                    content = loadResource("meshy-create-response.json"),
+                    headers = jsonHeaders()
+                )
+                url.contains("assets.meshy.ai") -> respond(
+                    content = ByteArray(128),
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.OctetStream.toString())
+                )
+                else -> {
+                    pollCount++
+                    if (pollCount <= 1) {
+                        respond(content = loadResource("meshy-task-pending.json"), headers = jsonHeaders())
+                    } else {
+                        respond(content = loadResource("meshy-task-succeeded.json"), headers = jsonHeaders())
+                    }
+                }
+            }
+        }) {
+            install(ContentNegotiation) {
+                json(Json { ignoreUnknownKeys = true; encodeDefaults = true; isLenient = true })
+            }
+        }
+
+        val client = MeshyClient(
+            apiKey = "test-key",
+            httpClient = mockClient,
+            pollInterval = 10.milliseconds,
+            maxPollDuration = 5000.milliseconds
+        )
+        val request = GenerationRequest(
+            description = "3D model from concept art",
+            type = AssetType.MODEL_3D,
+            params = mapOf("imageUrl" to "https://example.com/concept.png")
+        )
+
+        val result = client.generate(request)
+        assertIs<GenerationResult.Completed>(result)
+        assertTrue(postedToImageEndpoint)
+        assertTrue(result.asset.format == "glb")
+    }
 }

@@ -32,3 +32,14 @@ workspaces/
 *.swp
 *.swo
 *~
+
+# Node tooling for the img2threejs GLB bake (tools/threejs-bake)
+node_modules/
+.bake-staging/
+
+# img2threejs checkout (bootstrap: see README "Procedural 3D models").
+# Pinned upstream tool, not our source — clone it or set IMG2THREEJS_PATH.
+third_party/
+
+# sculpt sessions live inside workspaces, which are user data
+workspaces/*/sculpts/
