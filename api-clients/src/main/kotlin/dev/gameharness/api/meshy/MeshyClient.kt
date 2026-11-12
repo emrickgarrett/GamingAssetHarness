@@ -302,7 +302,7 @@ class MeshyClient(
 
     companion object {
         const val BASE_URL = "https://api.meshy.ai/openapi/v2/text-to-3d"
-        const val IMAGE_TO_3D_URL = "https://api.meshy.ai/openapi/v2/image-to-3d"
+        const val IMAGE_TO_3D_URL = "https://api.meshy.ai/openapi/v1/image-to-3d" // (v1: only text-to-3d is v2; v2 here is a 404)
         const val RIGGING_URL = "https://api.meshy.ai/openapi/v1/rigging"
         const val ANIMATIONS_URL = "https://api.meshy.ai/openapi/v1/animations"
 
