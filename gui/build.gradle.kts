@@ -185,6 +185,18 @@ compose.desktop {
             vendor = "Game Developer Harness"
             copyright = "2026 Game Developer Harness"
 
+            // The installed app runs on a cut-down Java runtime, and the plugin's
+            // default cut left out what the libraries here load by name. Without
+            // java.naming the first logger could not be created and the app died
+            // on launch (NoClassDefFoundError: javax/naming/NamingException);
+            // jdk.unsupported is what LWJGL (the 3D view) and coroutines reach
+            // native memory through. The list is what the packaged jars declare:
+            // run jdeps -s on each jar under build/compose/binaries/main/app.
+            modules(
+                "java.naming", "java.management", "java.security.jgss",
+                "jdk.unsupported", "jdk.net", "jdk.jfr",
+            )
+
             windows {
                 menuGroup = "Game Developer Harness"
                 shortcut = true

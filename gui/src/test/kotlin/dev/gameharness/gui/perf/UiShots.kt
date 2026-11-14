@@ -36,6 +36,7 @@ import java.io.File
  *   wait:<ms>                  keep drawing frames for that long
  *   settle                     draw until no thumbnail is being made (and at least 300 ms)
  *   shot:<name>                save <out-dir>/<name>.png
+ *   hover:<x>,<y>              rest the pointer there until a tooltip would show
  *   click:<x>,<y>              left click
  *   drag:<x1>,<y1>,<x2>,<y2>   left drag; append ,right for the right button, ,shift to hold Shift
  *   scroll:<x>,<y>,<notches>   wheel at a point, positive down
@@ -98,6 +99,13 @@ object UiShots {
                 "shot" -> {
                     val data = frame().encodeToData(EncodedImageFormat.PNG)!!
                     File(outDir, "$arg.png").writeBytes(data.bytes)
+                }
+                "hover" -> {
+                    val (x, y) = arg.split(",").map { it.toFloat() }
+                    scene.sendPointerEvent(PointerEventType.Move, Offset(x - 2f, y - 2f), buttons = none)
+                    frame()
+                    scene.sendPointerEvent(PointerEventType.Move, Offset(x, y), buttons = none)
+                    run(900) // long enough for a tooltip's delay
                 }
                 "click" -> {
                     val (x, y) = arg.split(",").map { it.toFloat() }

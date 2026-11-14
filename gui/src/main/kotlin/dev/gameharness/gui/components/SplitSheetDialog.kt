@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -21,16 +22,69 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
 import dev.gameharness.core.model.GeneratedAsset
+import dev.gameharness.core.util.SplitTileInfo
 import dev.gameharness.core.util.SpriteSheetSplitter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
 
 /** Maximum number of tile previews to render to avoid UI lag on very large sheets. */
-private const val MAX_TILE_PREVIEWS = 64
+internal const val MAX_TILE_PREVIEWS = 64
 
 /** Preset tile size options displayed as selectable chips. */
 private val TILE_PRESETS = listOf(16, 32, 48, 64, 128, 256)
+
+/** The sheet being split: on its way, unreadable, or decoded (as pixels to cut up and as a picture to draw). */
+private sealed interface SheetLoad {
+    data object Loading : SheetLoad
+    data object Failed : SheetLoad
+    class Ready(val image: BufferedImage, val bitmap: ImageBitmap) : SheetLoad
+}
+
+/** What one set of split settings leaves: the preview tiles, and the count of every tile kept. */
+private class SplitPreview(
+    val settings: List<Any>,
+    val tiles: List<Pair<SplitTileInfo, ImageBitmap>>,
+    val keptCount: Int,
+)
+
+/**
+ * Cuts [source] into [tiles], applies background removal ([removeBgColor], null
+ * for none) and the empty-tile filter, and returns the pictures of the kept
+ * tiles among the first [MAX_TILE_PREVIEWS], with the number kept overall.
+ * Gives up between tiles when the coroutine is cancelled, which is what makes
+ * dragging the tolerance slider cheap.
+ */
+internal suspend fun buildSplitPreview(
+    source: BufferedImage,
+    tiles: List<SplitTileInfo>,
+    skipEmpty: Boolean,
+    removeBgColor: java.awt.Color?,
+    bgTolerance: Int,
+): Pair<List<Pair<SplitTileInfo, ImageBitmap>>, Int> {
+    val previews = ArrayList<Pair<SplitTileInfo, ImageBitmap>>()
+    var kept = 0
+    for ((index, tileInfo) in tiles.withIndex()) {
+        val needsPixels = index < MAX_TILE_PREVIEWS || skipEmpty
+        if (!needsPixels) {
+            kept++
+            continue
+        }
+        coroutineContext.ensureActive()
+        var img = SpriteSheetSplitter.extractTile(source, tileInfo)
+        if (removeBgColor != null) {
+            img = SpriteSheetSplitter.removeBackgroundColor(img, removeBgColor, bgTolerance)
+        }
+        if (skipEmpty && SpriteSheetSplitter.isFullyTransparent(img)) continue
+        kept++
+        if (index < MAX_TILE_PREVIEWS) previews.add(tileInfo to img.toComposeImageBitmap())
+    }
+    return previews to kept
+}
 
 /**
  * Dialog for splitting a sprite sheet image into individual tiles.
@@ -47,26 +101,35 @@ internal fun SplitSheetDialog(
               targetFolder: String?) -> Unit,
     onDismiss: () -> Unit
 ) {
-    // Load source image once
-    val sourceImage = remember(asset.filePath) {
-        try {
-            ImageIO.read(File(asset.filePath))
-        } catch (_: Exception) {
-            null
+    // Load the source image once, off the UI thread: a large sheet takes long
+    // enough to decode that the window would stop answering while it did.
+    val sheet by produceState<SheetLoad>(SheetLoad.Loading, asset.filePath) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                val image = ImageIO.read(File(asset.filePath))
+                if (image == null) SheetLoad.Failed else SheetLoad.Ready(image, image.toComposeImageBitmap())
+            } catch (_: Exception) {
+                SheetLoad.Failed
+            }
         }
     }
 
-    if (sourceImage == null) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Cannot Load Image") },
-            text = { Text("Failed to load the sprite sheet image.") },
-            confirmButton = {
-                TextButton(onClick = onDismiss) { Text("OK") }
-            }
-        )
-        return
+    val loaded = when (val current = sheet) {
+        SheetLoad.Loading -> return // the dialog opens when the image is in
+        SheetLoad.Failed -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("Cannot Load Image") },
+                text = { Text("Failed to load the sprite sheet image.") },
+                confirmButton = {
+                    TextButton(onClick = onDismiss) { Text("OK") }
+                }
+            )
+            return
+        }
+        is SheetLoad.Ready -> current
     }
+    val sourceImage = loaded.image
 
     var tileWidth by remember { mutableStateOf(32) }
     var tileHeight by remember { mutableStateOf(32) }
@@ -95,44 +158,26 @@ internal fun SplitSheetDialog(
         SpriteSheetSplitter.analyze(sourceImage.width, sourceImage.height, tileWidth, tileHeight)
     }
 
-    // Generate tile previews with filtering applied (limited to MAX_TILE_PREVIEWS)
-    val tilePreviews = remember(
-        tileWidth, tileHeight, skipEmptyTiles, removeBgEnabled, selectedBgColor, bgTolerance
-    ) {
-        if (splitResult.totalTiles == 0) emptyList()
-        else {
-            val tilesToPreview = splitResult.tiles.take(MAX_TILE_PREVIEWS)
-            tilesToPreview.mapNotNull { tileInfo ->
-                var img = SpriteSheetSplitter.extractTile(sourceImage, tileInfo)
-                if (removeBgEnabled) {
-                    img = SpriteSheetSplitter.removeBackgroundColor(img, selectedBgColor, bgTolerance)
-                }
-                if (skipEmptyTiles && SpriteSheetSplitter.isFullyTransparent(img)) {
-                    null
-                } else {
-                    tileInfo to img.toComposeImageBitmap()
-                }
-            }
+    // The tile previews (the first MAX_TILE_PREVIEWS tiles, filtered) and how many
+    // tiles survive filtering. Worked out in the background: it reads every pixel
+    // of every tile, and it is asked for again on each step of the tolerance
+    // slider. The last result stays on screen until the next one is ready.
+    val previewSettings = listOf(tileWidth, tileHeight, skipEmptyTiles, removeBgEnabled, selectedBgColor, bgTolerance)
+    var preview by remember { mutableStateOf<SplitPreview?>(null) }
+    LaunchedEffect(previewSettings) {
+        val computed = withContext(Dispatchers.Default) {
+            buildSplitPreview(
+                sourceImage, splitResult.tiles, skipEmptyTiles,
+                if (removeBgEnabled) selectedBgColor else null, bgTolerance,
+            )
         }
+        preview = SplitPreview(previewSettings, computed.first, computed.second)
     }
-
-    // Count how many tiles survive filtering (for the button text and summary)
-    val filteredTileCount = remember(
-        tileWidth, tileHeight, skipEmptyTiles, removeBgEnabled, selectedBgColor, bgTolerance
-    ) {
-        if (!skipEmptyTiles && !removeBgEnabled) splitResult.totalTiles
-        else if (splitResult.totalTiles == 0) 0
-        else {
-            splitResult.tiles.count { tileInfo ->
-                var img = SpriteSheetSplitter.extractTile(sourceImage, tileInfo)
-                if (removeBgEnabled) {
-                    img = SpriteSheetSplitter.removeBackgroundColor(img, selectedBgColor, bgTolerance)
-                }
-                !(skipEmptyTiles && SpriteSheetSplitter.isFullyTransparent(img))
-            }
-        }
-    }
-    val skippedCount = splitResult.totalTiles - filteredTileCount
+    val tilePreviews = preview?.tiles ?: emptyList()
+    val previewedCount = preview?.keptCount ?: 0
+    // Null while the count for the current settings is still being worked out.
+    val filteredTileCount = preview?.takeIf { it.settings == previewSettings }?.keptCount
+    val skippedCount = if (filteredTileCount != null) splitResult.totalTiles - filteredTileCount else 0
 
     DialogWindow(
         onCloseRequest = onDismiss,
@@ -168,6 +213,7 @@ internal fun SplitSheetDialog(
                     ) {
                         GridOverlayPreview(
                             sourceImage = sourceImage,
+                            imageBitmap = loaded.bitmap,
                             tileWidth = tileWidth,
                             tileHeight = tileHeight,
                             modifier = Modifier.fillMaxSize().padding(8.dp)
@@ -455,10 +501,10 @@ internal fun SplitSheetDialog(
                     // ── Tile preview grid ───────────────────────────────────
                     if (tilePreviews.isNotEmpty()) {
                         Text(
-                            text = if (filteredTileCount > MAX_TILE_PREVIEWS)
-                                "Tile preview (showing ${tilePreviews.size} of $filteredTileCount):"
+                            text = if (previewedCount > MAX_TILE_PREVIEWS)
+                                "Tile preview (showing ${tilePreviews.size} of $previewedCount):"
                             else
-                                "Tile preview ($filteredTileCount tiles):",
+                                "Tile preview ($previewedCount tiles):",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -518,9 +564,9 @@ internal fun SplitSheetDialog(
                                     if (createSubfolder && subfolderName.isNotBlank()) subfolderName.trim() else null
                                 )
                             },
-                            enabled = filteredTileCount > 0
+                            enabled = filteredTileCount != null && filteredTileCount > 0
                         ) {
-                            Text("Split into $filteredTileCount tiles")
+                            Text(if (filteredTileCount != null) "Split into $filteredTileCount tiles" else "Counting tiles…")
                         }
                     }
                 }
@@ -536,14 +582,11 @@ internal fun SplitSheetDialog(
 @Composable
 private fun GridOverlayPreview(
     sourceImage: BufferedImage,
+    imageBitmap: ImageBitmap,
     tileWidth: Int,
     tileHeight: Int,
     modifier: Modifier = Modifier
 ) {
-    val imageBitmap = remember(sourceImage) {
-        sourceImage.toComposeImageBitmap()
-    }
-
     Canvas(modifier = modifier) {
         val canvasWidth = size.width
         val canvasHeight = size.height

@@ -155,6 +155,7 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 - **The 5-second disk check is read-only and off-thread** (`WorkspaceManager.hasExternalChanges`); `syncAssets`, which rewrites `workspace.json`, runs on the UI thread and only when the check says something changed
 - **The 3D view is not a component in the window.** It is drawn off screen on its own thread (`ViewerSession`, a hidden GLFW window's OpenGL context) and handed to Compose as an image, so menus and dialogs draw over it and tests can drive it without a window. The frame image must be read from state *inside the draw lambda*: the previous frame is closed as the next arrives, between composition and drawing, and a draw that captured it at composition time crashes in native code
 - **OpenGL calls belong to the thread that created the context** — `ModelRenderer`, `RenderTarget` and `ModelSnapshotter` are never touched from the UI thread
+- **The installed app has fewer Java modules than `:gui:run`.** jlink keeps only those named in `nativeDistributions { modules(...) }`. Logback needs `java.naming` and LWJGL needs `jdk.unsupported`; without the first the packaged app died creating its first logger while everything passed under Gradle. After adding a dependency, run `:gui:createDistributable` and start the exe
 - **Workspace paths are absolute** and scattered across filesystem; the registry tracks them
 - **API clients are stateful** - must be closed when agent stops to avoid resource leaks
 - **Sprite transparent backgrounds use chroma key** - Gemini models struggle with true transparency, so sprites are generated with a solid chroma key background that is automatically removed via flood-fill + edge de-fringing. The chroma key color is auto-selected based on description (green by default, magenta for green-themed sprites, blue if both conflict). Use `--no-bg-removal` (CLI) or `transparentBackground=false` (agent tool) to skip this.
@@ -165,8 +166,8 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 - **API Clients**: 37 tests (all 4 clients + rate limiter, chroma key prompt/color selection, using Ktor MockEngine)
 - **Agent**: 62 tests (agent lifecycle, bridge, system prompt, all tools)
 - **CLI**: 49 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate/revise/trim/open commands)
-- **GUI**: 20 tests (thumbnail store and its caches, glTF/GLB and OBJ loading, animation sampling and skinning)
-- **Total**: 354 tests, all passing
+- **GUI**: 23 tests (thumbnail store and its caches, glTF/GLB and OBJ loading, animation sampling and skinning, chat attachments, split-sheet previews)
+- **Total**: 357 tests, all passing
 
 Tests run with `user.home` pointed at an empty `build/test-home` and the key environment variables blanked (root `build.gradle.kts`). Keep it that way: the CLI tests build the real command tree, and with real keys in reach "generate model fails when API key not configured" generates a paid model instead of failing.
 

@@ -74,7 +74,7 @@ $JAVA_HOME/bin/java -version
 ./gradlew build
 ```
 
-This compiles all modules and runs the full test suite (354 tests). The tests never use your API keys or your `~/.gameharness` folder: each test run gets an empty home directory of its own.
+This compiles all modules and runs the full test suite (357 tests). The tests never use your API keys or your `~/.gameharness` folder: each test run gets an empty home directory of its own.
 
 ### 4. Run the application
 
@@ -188,7 +188,7 @@ When an asset is generated:
 
 The panel on the right lists the workspace's assets by folder. Each card shows a thumbnail: the sprite itself, or the 3D model drawn from the front quarter (a rigged model is posed partway through its first clip, so an idle, a run and a fall of the same character can be told apart). Thumbnails are made in the background and kept in `~/.gameharness/cache/thumbnails`, so a folder is only ever slow to fill in the first time it is seen, and never slow to open.
 
-Click a card to open the asset; **Back to Assets** returns to the folder where you left it, scrolled to the same place. Ctrl+click and Shift+click select several cards, right-click offers move and delete, and cards can be dragged onto a folder.
+Rest the pointer on a card to see what it cannot fit: the whole file name, the description the asset was generated from, and its type, format, size and date. Click a card to open the asset; **Back to Assets** returns to the folder where you left it, scrolled to the same place. Ctrl+click and Shift+click select several cards, right-click offers move and delete, and cards can be dragged onto a folder.
 
 ### Viewing 3D Models
 
@@ -295,6 +295,13 @@ The GUI and CLI modules are independent — both depend on `:core` and `:api-cli
 
 Installers are output to `gui/build/compose/binaries/`.
 
+The installed app runs on a cut-down Java runtime that holds only the modules listed under `nativeDistributions { modules(...) }` in `gui/build.gradle.kts`. A library that needs one not listed fails only in the installed app, never under `./gradlew :gui:run`, so after adding a dependency build the app image and start it before trusting an installer:
+
+```bash
+./gradlew :gui:createDistributable
+gui/build/compose/binaries/main/app/GameDeveloperHarness/GameDeveloperHarness.exe
+```
+
 ## Configuration Files
 
 The application stores its data in your home directory:
@@ -328,7 +335,7 @@ your-workspace-folder/
 ### Running Tests
 
 ```bash
-# All tests (354 across all modules)
+# All tests (357 across all modules)
 ./gradlew test
 
 # Specific module

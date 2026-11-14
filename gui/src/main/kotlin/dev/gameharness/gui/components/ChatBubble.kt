@@ -7,20 +7,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import dev.gameharness.core.model.ChatMessage
 import dev.gameharness.core.model.ChatRole
+import dev.gameharness.gui.thumbs.ThumbnailKind
+import dev.gameharness.gui.thumbs.ThumbnailState
+import dev.gameharness.gui.thumbs.rememberThumbnail
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
-import javax.imageio.ImageIO
 
 /** Renders a single chat message as a styled bubble, aligned right for user messages and left for agent messages. */
 @Composable
@@ -79,12 +78,11 @@ fun ChatBubble(message: ChatMessage, modifier: Modifier = Modifier) {
                     if (paths.isNotEmpty()) {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             for (attachPath in paths) {
-                                val thumbnail = remember(attachPath) {
-                                    loadThumbnail(attachPath)
-                                }
-                                if (thumbnail != null) {
-                                    Image(
-                                        bitmap = thumbnail,
+                                // From the thumbnail store, like the asset cards: decoding the
+                                // attachment here would stall the chat each time the bubble scrolled in.
+                                when (val thumbnail = rememberThumbnail(attachPath, ThumbnailKind.IMAGE)) {
+                                    is ThumbnailState.Ready -> Image(
+                                        bitmap = thumbnail.bitmap,
                                         contentDescription = "Attached reference image",
                                         modifier = Modifier
                                             .heightIn(max = 80.dp)
@@ -92,8 +90,9 @@ fun ChatBubble(message: ChatMessage, modifier: Modifier = Modifier) {
                                             .clip(RoundedCornerShape(6.dp)),
                                         contentScale = ContentScale.Fit
                                     )
-                                } else {
-                                    Text(
+                                    // holds the picture's place so the bubble does not jump when it arrives
+                                    ThumbnailState.Loading -> Spacer(Modifier.size(80.dp))
+                                    ThumbnailState.Unavailable -> Text(
                                         text = "\uD83D\uDCCE ${File(attachPath).name}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = textColor.copy(alpha = 0.7f)
@@ -113,15 +112,6 @@ fun ChatBubble(message: ChatMessage, modifier: Modifier = Modifier) {
             }
         }
     }
-}
-
-private fun loadThumbnail(path: String): ImageBitmap? {
-    return try {
-        val file = File(path)
-        if (file.exists()) {
-            ImageIO.read(file)?.toComposeImageBitmap()
-        } else null
-    } catch (_: Exception) { null }
 }
 
 private fun formatTimestamp(timestamp: Long): String {

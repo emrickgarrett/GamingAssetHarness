@@ -1,5 +1,8 @@
 package dev.gameharness.gui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.TooltipArea
+import androidx.compose.foundation.TooltipPlacement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import dev.gameharness.core.model.AssetType
 import dev.gameharness.core.model.GeneratedAsset
 import dev.gameharness.gui.thumbs.ThumbnailKind
+import java.text.SimpleDateFormat
+import java.util.Date
 
 /** Card for navigating up to the parent folder in the asset browser. */
 @Composable
@@ -164,6 +169,7 @@ internal fun FolderCard(
  * Supports Ctrl+click (toggle selection), Shift+click (range selection), and
  * drag-to-folder. The context menu adapts for single vs. multi-selection.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun AssetCardWithContextMenu(
     asset: GeneratedAsset,
@@ -187,6 +193,14 @@ internal fun AssetCardWithContextMenu(
     val isMultiMenu = isSelected && selectedCount > 1
 
     Box {
+        // The card has room for about seventeen characters of a file name, and
+        // generated names share their first thirty. Resting the pointer on a card
+        // shows the whole name and what the asset was asked to be.
+        TooltipArea(
+            tooltip = { if (!showContextMenu) AssetTooltip(asset) },
+            delayMillis = 600,
+            tooltipPlacement = TooltipPlacement.CursorPoint(offset = DpOffset(14.dp, 18.dp))
+        ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -280,6 +294,7 @@ internal fun AssetCardWithContextMenu(
                     }
                 }
             }
+        }
         }
 
         // Right-click context menu
@@ -395,6 +410,48 @@ private fun AssetCardContent(asset: GeneratedAsset) {
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * What a card cannot fit: the whole file name, the description the asset was
+ * generated from, and its type, format, size and date.
+ */
+@Composable
+private fun AssetTooltip(asset: GeneratedAsset) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.inverseSurface,
+        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+        shadowElevation = 6.dp
+    ) {
+        Column(
+            modifier = Modifier.widthIn(max = 380.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(text = asset.fileName, style = MaterialTheme.typography.labelLarge)
+            if (asset.description.isNotBlank()) {
+                Text(
+                    text = asset.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 8,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            val details = remember(asset) {
+                listOfNotNull(
+                    asset.type.displayName,
+                    asset.format.uppercase().takeIf { it.isNotBlank() },
+                    formatFileSize(asset.sizeBytes).takeIf { asset.sizeBytes > 0 },
+                    SimpleDateFormat("d MMM yyyy, HH:mm").format(Date(asset.createdAt)),
+                ).joinToString("  •  ")
+            }
+            Text(
+                text = details,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.7f)
+            )
         }
     }
 }

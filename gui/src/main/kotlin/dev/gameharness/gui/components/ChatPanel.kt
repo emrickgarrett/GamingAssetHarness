@@ -14,15 +14,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import dev.gameharness.core.model.ChatMessage
 import dev.gameharness.gui.LocalAwtWindow
+import dev.gameharness.gui.thumbs.ThumbnailKind
+import dev.gameharness.gui.thumbs.ThumbnailState
+import dev.gameharness.gui.thumbs.rememberThumbnail
 import dev.gameharness.gui.util.pickImage
 import java.io.File
-import javax.imageio.ImageIO
 
 /**
  * Scrollable chat panel displaying conversation messages, a thinking indicator, image attachment
@@ -215,12 +216,9 @@ fun ChatPanel(
 
 @Composable
 private fun AttachmentChip(path: String, onRemove: () -> Unit) {
-    val thumbnail: ImageBitmap? = remember(path) {
-        try {
-            val file = File(path)
-            if (file.exists()) ImageIO.read(file)?.toComposeImageBitmap() else null
-        } catch (_: Exception) { null }
-    }
+    // made in the background; the chip shows its file name until the picture is in
+    val thumbnail: ImageBitmap? =
+        (rememberThumbnail(path, ThumbnailKind.IMAGE) as? ThumbnailState.Ready)?.bitmap
 
     Surface(
         shape = RoundedCornerShape(6.dp),
