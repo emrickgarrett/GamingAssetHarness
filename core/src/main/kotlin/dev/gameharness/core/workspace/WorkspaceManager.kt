@@ -31,7 +31,7 @@ class WorkspaceManager(registryDir: Path) {
         /** File extensions recognized for auto-import, keyed by asset subdirectory. */
         val RECOGNIZED_EXTENSIONS: Map<String, Set<String>> = mapOf(
             "sprites" to setOf("png", "webp", "jpg", "jpeg"),
-            "models"  to setOf("glb"),
+            "models"  to setOf("glb", "gltf", "fbx", "obj"),
             "music"   to setOf("mp3", "wav", "ogg"),
             "sfx"     to setOf("mp3", "wav", "ogg")
         )
@@ -213,6 +213,61 @@ class WorkspaceManager(registryDir: Path) {
     }
 
     // --- Filesystem sync ---
+
+    /**
+     * Whether [syncAssets] would change anything: a file gone, a new file or
+     * folder on disk, or an asset sitting outside its folder's directory.
+     *
+     * Reads only, and is safe to call from any thread. The GUI polls with this
+     * in the background and runs the real sync on its own thread only when the
+     * answer is yes; before, the whole scan (an `exists` per asset and a walk of
+     * every asset directory) ran on the UI thread every five seconds.
+     */
+    fun hasExternalChanges(workspace: Workspace): Boolean {
+        val workspaceDir = Path.of(workspace.directoryPath)
+        if (!workspaceDir.exists()) return false
+
+        val knownPaths = HashSet<String>(workspace.assets.size * 2)
+        for (asset in workspace.assets) {
+            val path = Path.of(asset.filePath)
+            if (!path.exists()) return true
+            val normalized = path.toAbsolutePath().normalize()
+            if (asset.folder.isNotEmpty()) {
+                val expected = resolveAssetDir(workspaceDir, asset.type, asset.folder).resolve(asset.fileName)
+                if (normalized != expected.toAbsolutePath().normalize()) return true
+            }
+            knownPaths.add(normalized.toString())
+        }
+
+        for (folder in workspace.folders) {
+            for (assetType in AssetType.entries) {
+                if (!resolveAssetDir(workspaceDir, assetType, folder).isDirectory()) return true
+            }
+        }
+
+        for (assetType in AssetType.entries) {
+            val subDir = workspaceDir.resolve("assets").resolve(assetType.subdirectory)
+            if (!subDir.exists() || !subDir.isDirectory()) continue
+            val allowedExtensions = RECOGNIZED_EXTENSIONS[assetType.subdirectory] ?: continue
+
+            val changed = Files.walk(subDir).use { stream ->
+                stream.anyMatch { path ->
+                    if (Files.isRegularFile(path)) {
+                        val extension = path.fileName.toString().substringAfterLast('.', "").lowercase()
+                        extension in allowedExtensions &&
+                            path.toAbsolutePath().normalize().toString() !in knownPaths
+                    } else if (Files.isDirectory(path) && path != subDir) {
+                        val relativePath = subDir.relativize(path).toString().replace("\\", "/")
+                        relativePath.isNotEmpty() && relativePath != "." && relativePath !in workspace.folders
+                    } else {
+                        false
+                    }
+                }
+            }
+            if (changed) return true
+        }
+        return false
+    }
 
     /**
      * Synchronizes workspace asset metadata with what actually exists on disk.

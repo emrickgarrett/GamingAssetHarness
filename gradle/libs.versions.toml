@@ -11,7 +11,6 @@ slf4j = "2.0.16"
 logback = "1.5.16"
 clikt = "4.4.0"
 lwjgl = "3.3.6"
-lwjgl3-awt = "0.2.3"
 jgltf = "2.0.4"
 
 [libraries]
@@ -36,10 +35,11 @@ clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 
 lwjgl = { module = "org.lwjgl:lwjgl", version.ref = "lwjgl" }
 lwjgl-opengl = { module = "org.lwjgl:lwjgl-opengl", version.ref = "lwjgl" }
-# GLFW is only used for the OFFSCREEN render context (hidden window + FBO) that
-# produces sculpt review screenshots; the interactive viewer still uses AWT.
+# GLFW owns the OpenGL context every 3D picture is drawn in (a hidden window +
+# framebuffer): the viewer, the model thumbnails and the sculpt review screenshots.
 lwjgl-glfw = { module = "org.lwjgl:lwjgl-glfw", version.ref = "lwjgl" }
-lwjgl3-awt = { module = "org.lwjglx:lwjgl3-awt", version.ref = "lwjgl3-awt" }
+# Assimp reads the model formats jglTF does not: FBX and OBJ.
+lwjgl-assimp = { module = "org.lwjgl:lwjgl-assimp", version.ref = "lwjgl" }
 jgltf-model = { module = "de.javagl:jgltf-model", version.ref = "jgltf" }
 
 junit5-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit5" }

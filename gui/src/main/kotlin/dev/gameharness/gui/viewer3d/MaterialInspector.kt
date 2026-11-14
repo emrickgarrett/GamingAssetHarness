@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 fun MaterialInspectorPanel(
-    materials: List<GlbMaterial>,
+    materials: List<SceneMaterial>,
     selectedIndex: Int?,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit
@@ -71,7 +71,7 @@ fun MaterialInspectorPanel(
 @Composable
 private fun MaterialCard(
     index: Int,
-    material: GlbMaterial,
+    material: SceneMaterial,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
@@ -115,6 +115,20 @@ private fun MaterialCard(
             }
 
             Spacer(Modifier.height(6.dp))
+
+            if (material.baseColorTexture >= 0 || material.normalTexture >= 0) {
+                Text(
+                    text = listOfNotNull(
+                        "color map".takeIf { material.baseColorTexture >= 0 },
+                        "normal map".takeIf { material.normalTexture >= 0 },
+                        "roughness map".takeIf { material.metallicRoughnessTexture >= 0 },
+                        "emissive map".takeIf { material.emissiveTexture >= 0 },
+                    ).joinToString(", "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+                Spacer(Modifier.height(4.dp))
+            }
 
             // Metallic
             PropertyRow("Metallic", material.metallic)

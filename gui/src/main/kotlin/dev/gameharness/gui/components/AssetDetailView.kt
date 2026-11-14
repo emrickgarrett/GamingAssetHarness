@@ -90,8 +90,7 @@ internal fun AssetDetailView(
         // File info footer
         val file = File(asset.filePath)
         if (file.exists()) {
-            val sizeKb = file.length() / 1024
-            val sizeDisplay = if (sizeKb > 1024) "${"%.1f".format(sizeKb / 1024.0)} MB" else "$sizeKb KB"
+            val sizeDisplay = formatFileSize(file.length())
             Text(
                 text = "$sizeDisplay  \u2022  ${asset.format.uppercase()}  \u2022  ${asset.status.name}",
                 style = MaterialTheme.typography.labelSmall,

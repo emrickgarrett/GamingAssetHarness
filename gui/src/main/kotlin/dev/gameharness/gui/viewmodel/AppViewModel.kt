@@ -16,10 +16,12 @@ import dev.gameharness.core.workspace.WorkspaceManager
 import java.io.File
 import javax.imageio.ImageIO
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.nio.file.Path
@@ -391,14 +393,31 @@ class AppViewModel(
     // --- Filesystem sync ---
 
     /**
-     * Starts a background coroutine that polls [WorkspaceManager.syncAssets] every 5 seconds
-     * to detect files added or removed externally (via File Explorer, etc.).
+     * Starts a coroutine that looks every 5 seconds for files added or removed
+     * externally (via File Explorer, the CLI, etc.).
+     *
+     * The look itself ([WorkspaceManager.hasExternalChanges]) runs on a
+     * background thread and only reads. The sync that rewrites the workspace
+     * runs here, on the caller's thread, and only when something did change and
+     * the workspace is still the one that was checked: every other change to
+     * the workspace happens on this thread too, so none of them can be lost to it.
      */
     private fun startAssetSync(scope: CoroutineScope) {
         syncJob?.cancel()
         syncJob = scope.launch {
             while (true) {
-                syncOnce()
+                val ws = _currentWorkspace.value
+                if (ws != null) {
+                    val changed = withContext(Dispatchers.IO) {
+                        try {
+                            workspaceManager.hasExternalChanges(ws)
+                        } catch (e: Exception) {
+                            log.debug("Asset check skipped: {}", e.message)
+                            false
+                        }
+                    }
+                    if (changed && _currentWorkspace.value === ws) syncOnce()
+                }
                 delay(5_000)
             }
         }

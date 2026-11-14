@@ -3,8 +3,11 @@ package dev.gameharness.gui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,31 +45,48 @@ internal fun AssetBrowser(
     onNavigateUp: () -> Unit,
     onCreateFolder: (String) -> Unit,
     onDeleteFolder: (String) -> Unit,
-    onRenameFolder: (String, String) -> Unit
+    onRenameFolder: (String, String) -> Unit,
+    gridState: LazyGridState = rememberLazyGridState()
 ) {
     // Assets in the current folder only
-    val currentAssets by remember(assets, currentFolder) {
-        derivedStateOf {
-            assets.filter { it.folder == currentFolder }.sortedByDescending { it.createdAt }
-        }
+    val currentAssets = remember(assets, currentFolder) {
+        assets.filter { it.folder == currentFolder }.sortedByDescending { it.createdAt }
     }
 
     // Direct child folders of currentFolder
-    val childFolders = folders
-        .filter { folderPath ->
-            val parent = folderPath.substringBeforeLast("/", "")
-            parent == currentFolder && folderPath != currentFolder
+    val childFolders = remember(folders, currentFolder) {
+        folders
+            .filter { folderPath ->
+                val parent = folderPath.substringBeforeLast("/", "")
+                parent == currentFolder && folderPath != currentFolder
+            }
+            .map { it.substringAfterLast("/") to it }
+            .sortedBy { it.first.lowercase() }
+    }
+
+    // How many assets each folder holds, its subfolders included: one pass over
+    // the assets instead of one per folder card per recomposition.
+    val folderCounts = remember(assets) {
+        val counts = HashMap<String, Int>()
+        for (asset in assets) {
+            var folder = asset.folder
+            while (folder.isNotEmpty()) {
+                counts[folder] = (counts[folder] ?: 0) + 1
+                folder = folder.substringBeforeLast("/", "")
+            }
         }
-        .map { it.substringAfterLast("/") to it }
-        .sortedBy { it.first.lowercase() }
+        counts
+    }
 
     // ─── Selection State ─────────────────────────────────────
     var selectedAssetIds by remember { mutableStateOf(emptySet<String>()) }
     var lastClickedIndex by remember { mutableStateOf<Int?>(null) }
 
-    LaunchedEffect(currentAssets.map { it.id }) {
-        val validIds = currentAssets.map { it.id }.toSet()
-        selectedAssetIds = selectedAssetIds.intersect(validIds)
+    LaunchedEffect(currentAssets) {
+        if (selectedAssetIds.isNotEmpty()) {
+            val validIds = currentAssets.mapTo(HashSet()) { it.id }
+            selectedAssetIds = selectedAssetIds.intersect(validIds)
+        }
     }
 
     LaunchedEffect(currentFolder) {
@@ -188,18 +208,19 @@ internal fun AssetBrowser(
             // Grid of folders + asset cards
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 140.dp),
+                state = gridState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (currentFolder.isNotEmpty()) {
-                    item(key = "back") {
+                    item(key = "back", contentType = "back") {
                         BackFolderCard(onClick = onNavigateUp)
                     }
                 }
 
-                items(childFolders, key = { "folder:${it.second}" }) { (displayName, fullPath) ->
+                items(childFolders, key = { "folder:${it.second}" }, contentType = { "folder" }) { (displayName, fullPath) ->
                     Box(
                         modifier = Modifier.onGloballyPositioned { coords ->
                             folderCoordinates[fullPath] = coords
@@ -207,7 +228,7 @@ internal fun AssetBrowser(
                     ) {
                         FolderCard(
                             name = displayName,
-                            assetCount = assets.count { it.folder == fullPath || it.folder.startsWith("$fullPath/") },
+                            assetCount = folderCounts[fullPath] ?: 0,
                             onClick = { onNavigateToFolder(fullPath) },
                             onRename = { renameFolderTarget = fullPath to displayName },
                             onDelete = { deleteFolderTarget = fullPath },
@@ -216,8 +237,7 @@ internal fun AssetBrowser(
                     }
                 }
 
-                items(currentAssets, key = { it.id }) { asset ->
-                    val index = currentAssets.indexOf(asset)
+                itemsIndexed(currentAssets, key = { _, asset -> asset.id }, contentType = { _, _ -> "asset" }) { index, asset ->
                     AssetCardWithContextMenu(
                         asset = asset,
                         isSelected = asset.id in selectedAssetIds,
@@ -353,7 +373,7 @@ internal fun AssetBrowser(
     }
 
     deleteFolderTarget?.let { folderPath ->
-        val affectedCount = assets.count { it.folder == folderPath || it.folder.startsWith("$folderPath/") }
+        val affectedCount = folderCounts[folderPath] ?: 0
         DeleteFolderConfirmDialog(
             folderName = folderPath.substringAfterLast("/"),
             assetCount = affectedCount,

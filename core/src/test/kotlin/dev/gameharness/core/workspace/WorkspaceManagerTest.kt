@@ -444,6 +444,75 @@ class WorkspaceManagerTest {
         assertSame(wsWithAsset, synced, "Should return same instance when nothing changed")
     }
 
+    // ── hasExternalChanges(): the read-only look the GUI polls with ───────
+
+    /**
+     * The check must answer exactly when [WorkspaceManager.syncAssets] would
+     * change something. A "no" it gets wrong hides a new file from the browser
+     * for good; a "yes" it gets wrong puts the scan back on the UI thread
+     * every five seconds, which is the lag it was written to remove.
+     */
+    @Test
+    fun `hasExternalChanges is false for a workspace that is in step with the disk`() {
+        var ws = manager.createWorkspace("QuietTest", workspacesDir.resolve("quiet"))
+        ws = manager.createFolder(ws, "heroes")
+        val asset = GeneratedAsset(
+            id = "quiet-001", type = AssetType.SPRITE, fileName = "stable.png", filePath = "",
+            format = "png", description = "A stable sprite", folder = "heroes"
+        )
+        ws = manager.saveAsset(ws, asset, byteArrayOf(1, 2, 3)).second
+        ws = manager.syncAssets(ws) // settle: folders get a directory under every asset type
+
+        assertFalse(manager.hasExternalChanges(ws))
+        assertSame(ws, manager.syncAssets(ws), "and the sync agrees there is nothing to do")
+    }
+
+    @Test
+    fun `hasExternalChanges sees a deleted file, a new file and a new folder`() {
+        val workspace = manager.createWorkspace("NoisyTest", workspacesDir.resolve("noisy"))
+        val asset = GeneratedAsset(
+            id = "noisy-001", type = AssetType.SPRITE, fileName = "here.png", filePath = "",
+            format = "png", description = "A sprite"
+        )
+        val (savedPath, ws) = manager.saveAsset(workspace, asset, byteArrayOf(1, 2, 3))
+        assertFalse(manager.hasExternalChanges(ws))
+
+        val spritesDir = Path.of(ws.directoryPath, "assets", "sprites")
+
+        // a file dropped in from outside
+        val extra = spritesDir.resolve("dropped_in.png")
+        Files.write(extra, byteArrayOf(1))
+        assertTrue(manager.hasExternalChanges(ws), "new file")
+        Files.delete(extra)
+        assertFalse(manager.hasExternalChanges(ws))
+
+        // a file with an extension that is not an asset changes nothing
+        Files.write(spritesDir.resolve("notes.txt"), byteArrayOf(1))
+        assertFalse(manager.hasExternalChanges(ws), "unrecognised extension")
+
+        // a folder made from outside
+        val newDir = Files.createDirectories(spritesDir.resolve("monsters"))
+        assertTrue(manager.hasExternalChanges(ws), "new folder")
+        Files.delete(newDir)
+        assertFalse(manager.hasExternalChanges(ws))
+
+        // the asset's own file removed
+        Files.delete(savedPath)
+        assertTrue(manager.hasExternalChanges(ws), "deleted file")
+    }
+
+    @Test
+    fun `hasExternalChanges does not write`() {
+        val workspace = manager.createWorkspace("ReadOnlyTest", workspacesDir.resolve("read-only"))
+        val metadata = Path.of(workspace.directoryPath, "workspace.json")
+        val before = Files.readAllBytes(metadata)
+        Files.write(Path.of(workspace.directoryPath, "assets", "sprites", "new.png"), byteArrayOf(1))
+
+        assertTrue(manager.hasExternalChanges(workspace))
+
+        assertContentEquals(before, Files.readAllBytes(metadata), "the check must leave workspace.json alone")
+    }
+
     @Test
     fun `syncAssets handles both stale removal and new discovery in one call`() {
         val workspace = manager.createWorkspace("SyncBothTest", workspacesDir.resolve("sync-both"))

@@ -17,14 +17,12 @@ dependencies {
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
 
-    // 3D model viewer: LWJGL (OpenGL bindings) + jglTF (GLB loading)
+    // 3D model viewer: LWJGL (OpenGL bindings, a hidden GLFW window for the
+    // context) + jglTF (GLB and glTF loading) + Assimp (FBX and OBJ loading)
     implementation(libs.lwjgl)
     implementation(libs.lwjgl.opengl)
     implementation(libs.lwjgl.glfw)
-    implementation(libs.lwjgl3.awt) {
-        // Exclude transitive LWJGL deps with unresolved ${lwjgl.natives} classifier
-        exclude(group = "org.lwjgl")
-    }
+    implementation(libs.lwjgl.assimp)
     implementation(libs.jgltf.model)
 
     // LWJGL native libraries (platform-specific)
@@ -39,10 +37,13 @@ dependencies {
     runtimeOnly("org.lwjgl:lwjgl:$lwjglVersion:$lwjglNatives")
     runtimeOnly("org.lwjgl:lwjgl-opengl:$lwjglVersion:$lwjglNatives")
     runtimeOnly("org.lwjgl:lwjgl-glfw:$lwjglVersion:$lwjglNatives")
+    runtimeOnly("org.lwjgl:lwjgl-assimp:$lwjglVersion:$lwjglNatives")
 
     testImplementation(kotlin("test"))
     testImplementation(libs.junit5.api)
     testRuntimeOnly(libs.junit5.engine)
+    // the benchmark reads a workspace.json itself, so it never goes through the workspace manager
+    testImplementation(libs.kotlinx.serialization.json)
 }
 
 kotlin {
@@ -69,6 +70,76 @@ tasks.register<JavaExec>("renderGlb") {
     if (System.getProperty("os.name").contains("Mac", ignoreCase = true)) {
         jvmArgs("-XstartOnFirstThread")
     }
+}
+
+/**
+ * Times the asset browser against a real workspace with no window on screen:
+ * first frame of each folder, the frames of a scroll to its end, the way back.
+ * The workspace file is only read.
+ *
+ *   ./gradlew :gui:browserBench --args="<workspace.json> <out-dir> [width] [height] [folder ...]"
+ */
+tasks.register<JavaExec>("browserBench") {
+    group = "verification"
+    description = "Time folder navigation in the asset browser (args: <workspace.json> <out-dir> [w] [h])"
+    mainClass.set("dev.gameharness.gui.perf.BrowserBench")
+    classpath = sourceSets["test"].runtimeClasspath
+    jvmArgs("-Xmx2g")
+}
+
+/**
+ * Drives the asset panel of a real workspace with no window on screen and saves
+ * pictures of it: open a folder, open a model, orbit it. The actions are listed
+ * in UiShots.kt. The workspace file is only read.
+ *
+ *   ./gradlew :gui:uiShots --args="<workspace.json> <out-dir> 1100 900 folder:rigs settle shot:rigs"
+ */
+tasks.register<JavaExec>("uiShots") {
+    group = "verification"
+    description = "Screenshot the asset browser and model viewer headlessly (args: <workspace.json> <out-dir> <w> <h> <action> ...)"
+    mainClass.set("dev.gameharness.gui.perf.UiShots")
+    classpath = sourceSets["test"].runtimeClasspath
+    jvmArgs("-Xmx2g")
+}
+
+/**
+ * Times the 3D viewer on model files with no window: opening a model, and the
+ * pictures per second while it is turned and while its animation plays.
+ *
+ *   ./gradlew :gui:viewerBench --args="1400 1200 <model> [<model> ...]"
+ */
+tasks.register<JavaExec>("viewerBench") {
+    group = "verification"
+    description = "Time the 3D viewer (args: <w> <h> <model> ...)"
+    mainClass.set("dev.gameharness.gui.perf.ViewerBench")
+    classpath = sourceSets["test"].runtimeClasspath
+    jvmArgs("-Xmx2g")
+}
+
+/**
+ * Runs the whole application in a real window, works it with made-up mouse
+ * events (the real pointer is not moved) and saves pictures of the window. The
+ * actions are listed in WindowCheck.kt.
+ *
+ * It is the real app, so it must be given a throwaway home directory: settings,
+ * the workspace registry and logs are read from and written to
+ * <checkHome>/.gameharness, never the user's own. The API key is a placeholder;
+ * nothing is sent unless a chat message is typed.
+ *
+ *   ./gradlew :gui:windowCheck -PcheckHome=<dir> --args="<out-dir> 1300 900 wait:2000 shot:start"
+ */
+tasks.register<JavaExec>("windowCheck") {
+    group = "verification"
+    description = "Drive the real app window with synthetic input (needs -PcheckHome=<throwaway dir>)"
+    mainClass.set("dev.gameharness.gui.perf.WindowCheck")
+    classpath = sourceSets["test"].runtimeClasspath
+    val checkHome = providers.gradleProperty("checkHome")
+    doFirst {
+        require(checkHome.isPresent) { "windowCheck runs the real app: pass -PcheckHome=<throwaway dir> so it leaves your own settings alone" }
+        systemProperty("user.home", checkHome.get())
+        systemProperty("gameharness.thumbnailCache", File(checkHome.get(), "thumbnails").path)
+    }
+    environment("OPENROUTER_API_KEY", "window-check-placeholder")
 }
 
 /**

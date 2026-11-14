@@ -100,7 +100,10 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 - `gui/.../gui/App.kt` - Root composable, main screen layout, keyboard shortcuts
 - `gui/.../gui/viewmodel/AppViewModel.kt` - MVVM state holder, agent lifecycle, workspace management
 - `gui/.../gui/components/ChatPanel.kt` - Chat message list + input field
-- `gui/.../gui/components/AssetPreview.kt` - Asset display (images rendered, files shown as info cards)
+- `gui/.../gui/components/AssetPreview.kt` - The asset panel: routes between agent review, the detail view of one asset, the browser grid and the empty state
+- `gui/.../gui/components/AssetBrowser.kt`, `AssetCard.kt` - The folder grid and its cards (selection, drag to folder, context menus)
+- `gui/.../gui/thumbs/` - `ThumbnailStore` (thumbnails made off the UI thread, memory + disk caches), `rememberThumbnail`, `ModelThumbnails` (3D model cards)
+- `gui/.../gui/viewer3d/` - The 3D model viewer: `SceneModel` (format-neutral model), `GltfLoader` (GLB/glTF via jglTF), `AssimpLoader` (FBX/OBJ), `ScenePose` (animation sampling, joint matrices), `ModelRenderer` (OpenGL 3.3: textures, GPU skinning), `GlContext` (hidden GLFW window + framebuffer), `ViewerSession` (render thread), `ModelViewer` (the composable), `ModelSnapshotter`/`OffscreenRenderer` (stills)
 - `gui/.../gui/components/WorkspaceSelector.kt` - Workspace dropdown, new/rename/delete dialogs, context dialog
 - `gui/.../gui/theme/Theme.kt` - Material 3 light/dark themes
 - `gui/.../gui/util/FolderPicker.kt` - JFileChooser wrapper for native folder selection
@@ -111,6 +114,7 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 ~/.gameharness/
   settings.json              # API keys + dark mode preference
   workspace-registry.json    # Paths to all known workspaces
+  cache/thumbnails/          # Asset browser thumbnails (WebP, keyed by path + mtime + size; pruned past 512 MB)
   logs/
     gameharness.log          # Rolling log (7 days, 50MB cap)
 
@@ -120,7 +124,7 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
   chat-history.json          # Conversation messages
   assets/
     sprites/                 # 2D sprites (PNG, WebP)
-    models/                  # 3D models (GLB)
+    models/                  # 3D models (GLB; glTF, FBX and OBJ are recognised and viewable too)
     music/                   # Music tracks (MP3)
     sfx/                     # Sound effects (MP3)
 ```
@@ -147,17 +151,26 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 - **`simpleOpenRouterExecutor(apiKey)`** imported from `ai.koog.prompt.executor.llms.all`
 - **`OpenRouterModels`** fields: `Claude4_5Sonnet`, `Claude4Sonnet`, etc.
 - **Compose click handlers run on AWT EDT** - cannot use `SwingUtilities.invokeAndWait` from click handlers (use `isEventDispatchThread()` check)
+- **Nothing in the asset grid reads an asset file on the UI thread.** A composable that calls `ImageIO.read`, `File.exists()` or a model loader runs it for every card on every recomposition; that is what once made a folder of 170 images take two seconds to open. Cards get pictures from `rememberThumbnail`, sizes from `GeneratedAsset.sizeBytes`, and full images from a background decode
+- **The 5-second disk check is read-only and off-thread** (`WorkspaceManager.hasExternalChanges`); `syncAssets`, which rewrites `workspace.json`, runs on the UI thread and only when the check says something changed
+- **The 3D view is not a component in the window.** It is drawn off screen on its own thread (`ViewerSession`, a hidden GLFW window's OpenGL context) and handed to Compose as an image, so menus and dialogs draw over it and tests can drive it without a window. The frame image must be read from state *inside the draw lambda*: the previous frame is closed as the next arrives, between composition and drawing, and a draw that captured it at composition time crashes in native code
+- **OpenGL calls belong to the thread that created the context** — `ModelRenderer`, `RenderTarget` and `ModelSnapshotter` are never touched from the UI thread
 - **Workspace paths are absolute** and scattered across filesystem; the registry tracks them
 - **API clients are stateful** - must be closed when agent stops to avoid resource leaks
 - **Sprite transparent backgrounds use chroma key** - Gemini models struggle with true transparency, so sprites are generated with a solid chroma key background that is automatically removed via flood-fill + edge de-fringing. The chroma key color is auto-selected based on description (green by default, magenta for green-themed sprites, blue if both conflict). Use `--no-bg-removal` (CLI) or `transparentBackground=false` (agent tool) to skip this.
 
 ## Test Summary
 
-- **Core**: 171 tests (models, config, workspace, file utils, retry logic, sprite sheet splitting, flood-fill bg removal, multi-pass defringe, trim transparent, replace asset file, open workspace, key encryption, settings manager)
-- **API Clients**: 35 tests (all 4 clients + rate limiter, chroma key prompt/color selection, using Ktor MockEngine)
-- **Agent**: 50 tests (agent lifecycle, bridge, system prompt, all tools)
-- **CLI**: 38 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate/revise/trim/open commands)
-- **Total**: 294 tests, all passing
+- **Core**: 186 tests (models, config, workspace, file utils, retry logic, sprite sheet splitting, flood-fill bg removal, multi-pass defringe, trim transparent, replace asset file, open workspace, the read-only change check, key encryption, settings manager)
+- **API Clients**: 37 tests (all 4 clients + rate limiter, chroma key prompt/color selection, using Ktor MockEngine)
+- **Agent**: 62 tests (agent lifecycle, bridge, system prompt, all tools)
+- **CLI**: 49 tests (JSON output, progress reporter, client factory, config/workspace/asset/generate/revise/trim/open commands)
+- **GUI**: 20 tests (thumbnail store and its caches, glTF/GLB and OBJ loading, animation sampling and skinning)
+- **Total**: 354 tests, all passing
+
+Tests run with `user.home` pointed at an empty `build/test-home` and the key environment variables blanked (root `build.gradle.kts`). Keep it that way: the CLI tests build the real command tree, and with real keys in reach "generate model fails when API key not configured" generates a paid model instead of failing.
+
+What needs a GPU or a screen is not a unit test; it is checked with the tasks under "Measuring and looking at the UI" in the README (`:gui:browserBench`, `:gui:uiShots`, `:gui:viewerBench`, `:gui:windowCheck`).
 
 ## CLI Module (`:cli`)
 

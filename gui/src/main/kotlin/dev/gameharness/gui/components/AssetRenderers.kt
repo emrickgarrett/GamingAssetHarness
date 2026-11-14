@@ -9,27 +9,41 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.gameharness.core.model.AssetType
+import dev.gameharness.gui.thumbs.LocalThumbnailStore
+import dev.gameharness.gui.thumbs.ThumbnailKind
+import dev.gameharness.gui.thumbs.ThumbnailState
+import dev.gameharness.gui.thumbs.rememberThumbnail
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.jetbrains.skia.Image
 import java.io.File
-import javax.imageio.ImageIO
 import javax.sound.sampled.*
 
-/** Renders a sprite image from the filesystem. Shows an error message if the file cannot be loaded. */
+/**
+ * Renders a sprite at full size. The file is decoded off the UI thread; until it
+ * arrives the grid's thumbnail of the same file stands in, so opening a large
+ * image never stalls the window.
+ */
 @Composable
 internal fun ImagePreview(filePath: String, modifier: Modifier = Modifier) {
-    val imageBitmap = remember(filePath) {
-        try {
-            val file = File(filePath)
-            if (file.exists()) {
-                val bufferedImage = ImageIO.read(file)
-                bufferedImage?.toComposeImageBitmap()
-            } else null
-        } catch (e: Exception) {
-            null
+    val store = LocalThumbnailStore.current
+    val placeholder = remember(filePath) { store.cached(filePath) }
+    val full by produceState<FullImage>(FullImage.Loading, filePath) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                val file = File(filePath)
+                if (!file.exists()) FullImage.Failed
+                else Image.makeFromEncoded(file.readBytes()).use { FullImage.Ready(it.toComposeImageBitmap()) }
+            } catch (e: Exception) {
+                FullImage.Failed
+            }
         }
     }
 
@@ -41,20 +55,35 @@ internal fun ImagePreview(filePath: String, modifier: Modifier = Modifier) {
             ),
         contentAlignment = Alignment.Center
     ) {
-        if (imageBitmap != null) {
-            Image(
-                bitmap = imageBitmap,
+        when (val image = full) {
+            is FullImage.Ready -> Image(
+                bitmap = image.bitmap,
                 contentDescription = "Generated sprite",
                 modifier = Modifier.padding(8.dp).fillMaxSize(),
                 contentScale = ContentScale.Fit
             )
-        } else {
-            Text(
+            FullImage.Loading -> if (placeholder != null) {
+                Image(
+                    bitmap = placeholder,
+                    contentDescription = "Generated sprite",
+                    modifier = Modifier.padding(8.dp).fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+            } else {
+                CircularProgressIndicator()
+            }
+            FullImage.Failed -> Text(
                 text = "Unable to load image",
                 color = MaterialTheme.colorScheme.error
             )
         }
     }
+}
+
+private sealed interface FullImage {
+    data object Loading : FullImage
+    data object Failed : FullImage
+    class Ready(val bitmap: ImageBitmap) : FullImage
 }
 
 /** Renders an audio player with play/stop controls for music or sound effect files. */
@@ -211,34 +240,30 @@ internal fun FileInfoCard(filePath: String, modifier: Modifier = Modifier) {
 
 /** Renders a large emoji icon for asset type placeholders. */
 @Composable
-internal fun AssetIcon(icon: String) {
+internal fun AssetIcon(icon: String, alpha: Float = 1f) {
     Text(
         text = icon,
         style = MaterialTheme.typography.headlineLarge,
-        textAlign = TextAlign.Center
+        textAlign = TextAlign.Center,
+        modifier = Modifier.alpha(alpha)
     )
 }
 
-/** Renders a small sprite thumbnail from the filesystem. Used in asset cards. */
+/**
+ * Renders the small picture of an asset file on its card: a sprite scaled down,
+ * or a 3D model drawn from the front. [fallbackIcon] shows while there is no
+ * picture, and stays if one cannot be made.
+ */
 @Composable
-internal fun SpriteThumbnail(filePath: String) {
-    val imageBitmap = remember(filePath) {
-        try {
-            val file = File(filePath)
-            if (file.exists()) {
-                ImageIO.read(file)?.toComposeImageBitmap()
-            } else null
-        } catch (_: Exception) { null }
-    }
-
-    if (imageBitmap != null) {
-        Image(
-            bitmap = imageBitmap,
-            contentDescription = "Sprite thumbnail",
+internal fun AssetThumbnail(filePath: String, kind: ThumbnailKind, fallbackIcon: String) {
+    when (val thumbnail = rememberThumbnail(filePath, kind)) {
+        is ThumbnailState.Ready -> Image(
+            bitmap = thumbnail.bitmap,
+            contentDescription = null,
             modifier = Modifier.fillMaxSize().padding(6.dp),
             contentScale = ContentScale.Fit
         )
-    } else {
-        AssetIcon("\uD83D\uDDBC")
+        ThumbnailState.Loading -> AssetIcon(fallbackIcon, alpha = 0.25f)
+        ThumbnailState.Unavailable -> AssetIcon(fallbackIcon)
     }
 }

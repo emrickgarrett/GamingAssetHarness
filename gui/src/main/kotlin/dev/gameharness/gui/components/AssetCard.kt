@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import dev.gameharness.core.model.AssetType
 import dev.gameharness.core.model.GeneratedAsset
-import java.io.File
+import dev.gameharness.gui.thumbs.ThumbnailKind
 
 /** Card for navigating up to the parent folder in the asset browser. */
 @Composable
@@ -182,7 +182,6 @@ internal fun AssetCardWithContextMenu(
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
     var contextMenuOffset by remember { mutableStateOf(DpOffset.Zero) }
-    val file = File(asset.filePath)
     var cardCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     val isMultiMenu = isSelected && selectedCount > 1
@@ -262,7 +261,7 @@ internal fun AssetCardWithContextMenu(
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Box {
-                AssetCardContent(asset, file)
+                AssetCardContent(asset)
 
                 if (isSelected) {
                     Box(
@@ -334,7 +333,7 @@ internal fun AssetCardWithContextMenu(
 }
 
 @Composable
-private fun AssetCardContent(asset: GeneratedAsset, file: File) {
+private fun AssetCardContent(asset: GeneratedAsset) {
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -349,10 +348,10 @@ private fun AssetCardContent(asset: GeneratedAsset, file: File) {
             contentAlignment = Alignment.Center
         ) {
             when (asset.type) {
-                AssetType.SPRITE -> SpriteThumbnail(asset.filePath)
+                AssetType.SPRITE -> AssetThumbnail(asset.filePath, ThumbnailKind.IMAGE, "\uD83D\uDDBC")
                 AssetType.MUSIC -> AssetIcon("\uD83C\uDFB5")
                 AssetType.SOUND_EFFECT -> AssetIcon("\uD83D\uDD0A")
-                AssetType.MODEL_3D -> AssetIcon("\uD83E\uDDF1")
+                AssetType.MODEL_3D -> AssetThumbnail(asset.filePath, ThumbnailKind.MODEL, "\uD83E\uDDF1")
             }
         }
 
@@ -387,11 +386,10 @@ private fun AssetCardContent(asset: GeneratedAsset, file: File) {
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
-                if (file.exists()) {
-                    val sizeKb = file.length() / 1024
-                    val sizeDisplay = if (sizeKb > 1024) "${"%.1f".format(sizeKb / 1024.0)} MB" else "$sizeKb KB"
+                // the recorded size, not a look at the disk: this runs for every card that is composed
+                if (asset.sizeBytes > 0) {
                     Text(
-                        text = sizeDisplay,
+                        text = formatFileSize(asset.sizeBytes),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
@@ -399,6 +397,12 @@ private fun AssetCardContent(asset: GeneratedAsset, file: File) {
             }
         }
     }
+}
+
+/** "640 KB" or "14.2 MB". */
+internal fun formatFileSize(bytes: Long): String {
+    val kb = bytes / 1024
+    return if (kb > 1024) "${"%.1f".format(kb / 1024.0)} MB" else "$kb KB"
 }
 
 /** Empty state shown when no assets exist yet. Displays available capabilities. */

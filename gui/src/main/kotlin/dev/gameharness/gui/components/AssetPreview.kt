@@ -1,6 +1,7 @@
 package dev.gameharness.gui.components
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -43,6 +44,11 @@ fun AssetPreview(
 ) {
     // Track which asset the user is browsing (null = grid view)
     var browsingAsset by remember { mutableStateOf<GeneratedAsset?>(null) }
+
+    // Where each folder's grid was scrolled to. Kept here because the grid leaves
+    // the screen while an asset is open: coming back from asset 150 of a folder
+    // should land on asset 150, not on the top row.
+    val gridStates = remember { HashMap<String, LazyGridState>() }
 
     // Clear browsing selection when agent presents a new asset for review
     LaunchedEffect(preview) {
@@ -98,7 +104,8 @@ fun AssetPreview(
                 onNavigateUp = onNavigateUp,
                 onCreateFolder = onCreateFolder,
                 onDeleteFolder = onDeleteFolder,
-                onRenameFolder = onRenameFolder
+                onRenameFolder = onRenameFolder,
+                gridState = gridStates.getOrPut(currentFolder) { LazyGridState() }
             )
 
             // No assets yet — show the empty/capabilities state

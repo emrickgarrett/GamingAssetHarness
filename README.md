@@ -30,13 +30,15 @@ The agent adapts to your setup — only the services you configure will be avail
 - **NanoBanana model selection** — choose between Nano Banana, Nano Banana 2, or Nano Banana Pro for 2D generation
 - **Image-to-3D conversion** — turn 2D concept art into 3D models by providing an image URL
 - **3D format selection** — export 3D models as GLB, FBX, or OBJ
+- **3D model viewer** — open a GLB, glTF, FBX or OBJ model in place and orbit, pan and zoom around it, with its textures. Rigged models play their animation clips: pick a clip, pause, scrub, change speed. Bones, wireframe and untextured views are a click away
+- **An asset browser that keeps up** — thumbnails of sprites and 3D models are made in the background and cached, so a folder of hundreds of assets opens at once and scrolls smoothly
 - **Multi-service integration** — generate 2D, 3D, music, and audio from a single interface
 - **Progress tracking** — real-time progress for long-running generations (3D models, music)
 - **Asset management** — approve, deny (with feedback), or delete generated assets
 - **Light & dark themes** — Material 3 theming with persistent preference
 - **Open existing folders** — use any existing project directory as a workspace; existing assets in `assets/` subdirectories are auto-discovered
 - **Keyboard shortcuts** — `Ctrl+,` for settings, `Ctrl+Shift+N` for new workspace, `Ctrl+Shift+O` to open existing folder
-- **Cross-platform** — runs on Windows, macOS, and Linux
+- **Cross-platform** — runs on Windows, macOS, and Linux (the 3D model viewer and model thumbnails need Windows or Linux; see [Troubleshooting](#troubleshooting))
 
 ## Prerequisites
 
@@ -72,7 +74,7 @@ $JAVA_HOME/bin/java -version
 ./gradlew build
 ```
 
-This compiles all modules and runs the full test suite (294 tests).
+This compiles all modules and runs the full test suite (354 tests). The tests never use your API keys or your `~/.gameharness` folder: each test run gets an empty home directory of its own.
 
 ### 4. Run the application
 
@@ -182,6 +184,27 @@ When an asset is generated:
 - **Approve** to keep it in your workspace
 - **Deny** to reject it (optionally provide feedback so the agent can try again)
 
+### Browsing Assets
+
+The panel on the right lists the workspace's assets by folder. Each card shows a thumbnail: the sprite itself, or the 3D model drawn from the front quarter (a rigged model is posed partway through its first clip, so an idle, a run and a fall of the same character can be told apart). Thumbnails are made in the background and kept in `~/.gameharness/cache/thumbnails`, so a folder is only ever slow to fill in the first time it is seen, and never slow to open.
+
+Click a card to open the asset; **Back to Assets** returns to the folder where you left it, scrolled to the same place. Ctrl+click and Shift+click select several cards, right-click offers move and delete, and cards can be dragged onto a folder.
+
+### Viewing 3D Models
+
+Clicking a 3D model opens it in the viewer. GLB, glTF, FBX and OBJ files are supported, with their textures (embedded in the file, or beside it for OBJ and FBX).
+
+| To | Do |
+|----|----|
+| Orbit | Drag |
+| Pan | Right-drag, middle-drag, or Shift+drag |
+| Zoom | Scroll |
+| Frame the model again | **Reset View** |
+
+The toolbar switches **Textures** (off shows the bare shape in grey), **Wireframe**, **Bones** (the skeleton, drawn over a rigged model), the floor **Grid**, and the **Materials** panel, which lists each material and highlights it on the model when clicked.
+
+A model with animation starts playing its first clip. The bar under the view picks the clip (or the rest pose), pauses, scrubs along the timeline and cycles the speed (1×, 2×, ¼×, ½×).
+
 ## Claude Code Skill (CLI)
 
 GameDeveloperHarness includes a CLI module and a Claude Code skill that lets Claude generate game assets for you from **any project**. When you're building a game in a separate repo, just invoke `/generate-asset` and Claude will handle workspace setup, asset generation, and file delivery.
@@ -280,6 +303,8 @@ The application stores its data in your home directory:
 ~/.gameharness/
   settings.json              # API keys and preferences
   workspace-registry.json    # Index of all workspace locations
+  cache/
+    thumbnails/              # Asset browser thumbnails (safe to delete; rebuilt as needed)
   logs/
     gameharness.log          # Application logs (7-day rolling)
 ```
@@ -293,7 +318,7 @@ your-workspace-folder/
   chat-history.json          # Conversation history
   assets/
     sprites/                 # PNG, WebP files
-    models/                  # GLB files
+    models/                  # GLB files (glTF, FBX and OBJ are recognised too)
     music/                   # MP3 files
     sfx/                     # MP3 files
 ```
@@ -303,7 +328,7 @@ your-workspace-folder/
 ### Running Tests
 
 ```bash
-# All tests (294 across all modules)
+# All tests (354 across all modules)
 ./gradlew test
 
 # Specific module
@@ -311,7 +336,28 @@ your-workspace-folder/
 ./gradlew :api-clients:test
 ./gradlew :agent:test
 ./gradlew :cli:test
+./gradlew :gui:test
 ```
+
+### Measuring and looking at the UI
+
+Four Gradle tasks exercise the asset browser and the 3D viewer against real files. The first three draw the app's own asset panel with no window on screen; all of them only read the workspace they are pointed at.
+
+```bash
+# Time folder navigation: first frame of every folder, a scroll to its end, the way back
+./gradlew :gui:browserBench --args="<workspace.json> <out-dir> 1400 1300"
+
+# Screenshot the panel while driving it: open a folder, click a model, orbit it
+./gradlew :gui:uiShots --args="<workspace.json> <out-dir> 1300 1000 folder:rigs settle shot:rigs click:410,150 wait:2500 shot:viewer"
+
+# Time the 3D viewer: opening a model, frames per second while turning it and while it animates
+./gradlew :gui:viewerBench --args="1400 1200 <model.glb> <model.fbx>"
+
+# Run the whole app in a real window with synthetic mouse input, against a throwaway home directory
+./gradlew :gui:windowCheck -PcheckHome=<dir> --args="<out-dir> 1300 900 wait:2000 shot:start"
+```
+
+`UiShots.kt` and `WindowCheck.kt` list the actions. `windowCheck` is the only one that opens a window (it stays on top and takes no focus), and it refuses to run without `-PcheckHome`, so it never touches your own settings.
 
 ### Tech Stack
 
@@ -319,6 +365,7 @@ your-workspace-folder/
 - **KOOG 0.6.3** — JetBrains AI agent framework
 - **Compose Desktop 1.8.2** — Material 3 UI
 - **Ktor 3.1.3** — Async HTTP client
+- **LWJGL 3.3.6** (OpenGL, GLFW, Assimp) and **jglTF 2.0.4** — the 3D model viewer
 - **JUnit 5** — Testing framework
 - **SLF4J + Logback** — Logging
 
@@ -338,6 +385,12 @@ Check that your OpenRouter API key is valid (use the Test button in Settings). C
 
 **Asset type not available**
 The agent only offers asset types for which you've configured API keys. Check Settings to make sure the relevant key is entered.
+
+**"The 3D view could not start"**
+The model viewer and the model thumbnails draw with OpenGL 3.3 in a hidden window of their own. They need a graphics driver that offers it and a desktop session; on a remote session without GPU access, or on macOS (where that hidden window cannot share the process with the app's own window), the viewer shows this message and model cards keep their icon. Everything else works as usual.
+
+**A thumbnail looks out of date**
+Thumbnails are keyed by the file's path, size and modification time, so this should not happen; if it does, delete `~/.gameharness/cache/thumbnails` and they are made again.
 
 ## License
 
