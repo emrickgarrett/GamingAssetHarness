@@ -179,13 +179,22 @@ class MeshyClient(
      * Auto-rigs a humanoid GLB (sent inline as a data URI). Meshy only rigs bipedal characters
      * that face +Z and have at most 380k triangles.
      */
-    suspend fun rig(modelGlb: ByteArray, heightMeters: Double, skeletonTemplate: String = ""): RigOutcome {
+    suspend fun rig(
+        modelGlb: ByteArray,
+        heightMeters: Double,
+        skeletonTemplate: String = "",
+        includeFingers: Boolean = false
+    ): RigOutcome {
         onProgress?.invoke(5, "Uploading model for rigging...")
         val dataUri = "data:application/octet-stream;base64," + Base64.getEncoder().encodeToString(modelGlb)
-        val taskId = if (skeletonTemplate.isEmpty()) {
+        val taskId = if (skeletonTemplate.isEmpty() && !includeFingers) {
             createV1Task(RIGGING_URL, MeshyRigRequest(dataUri, heightMeters), "rigging")
         } else {
-            createV1Task(RIGGING_URL, MeshyRigTemplateRequest(dataUri, heightMeters, skeletonTemplate), "rigging")
+            createV1Task(
+                RIGGING_URL,
+                MeshyRigTemplateRequest(dataUri, heightMeters, skeletonTemplate.ifEmpty { "meshyrig" }, includeFingers),
+                "rigging"
+            )
         }
         onProgress?.invoke(10, "Rigging character...")
         val task = pollUntilComplete(

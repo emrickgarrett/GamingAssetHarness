@@ -3,6 +3,7 @@ package dev.gameharness.cli.commands.generate
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.requireObject
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.double
@@ -30,6 +31,7 @@ class GenerateRig : CliktCommand(name = "rig") {
     private val model by option("-m", "--model", help = "Path to a humanoid GLB facing +Z").required()
     private val height by option("--height", help = "Character height in metres").double().default(1.7)
     private val skeleton by option("--skeleton", help = "Skeleton template: meshyrig (default), mixamo, ue5_mannequin, unity_humanoid, ...").default("")
+    private val fingers by option("--fingers", help = "Rig the fingers too (so hands can close round what they hold)").flag()
     private val name by option("-n", "--name", help = "Name used for the saved files").default("character")
     private val folder by option("-f", "--folder", help = "Virtual folder within workspace").default("")
 
@@ -47,7 +49,7 @@ class GenerateRig : CliktCommand(name = "rig") {
         }
 
         try {
-            val outcome = runBlocking { client.rig(Files.readAllBytes(modelPath), height, skeleton) }
+            val outcome = runBlocking { client.rig(Files.readAllBytes(modelPath), height, skeleton, fingers) }
             val saver = MeshyAssetSaver(ctx, ws, folder)
             val rigged = runBlocking { saver.save(client.download(outcome.riggedGlbUrl, "rigged model"), "$name rigged") }
             val walking = outcome.walkingGlbUrl?.let { url ->
