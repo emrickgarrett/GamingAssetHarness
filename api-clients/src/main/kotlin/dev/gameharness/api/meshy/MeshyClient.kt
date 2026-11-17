@@ -298,6 +298,44 @@ class MeshyClient(
         return "data:$mime;base64," + Base64.getEncoder().encodeToString(image)
     }
 
+    /**
+     * Makes an animation from words (text-to-motion, 2-10 s) and applies it to a rigged character; returns the URL
+     * of a GLB of the character with the clip. Meshy keeps the motion 3 days, so it is applied at once.
+     */
+    suspend fun motion(rigTaskId: String, prompt: String, seconds: Double): String {
+        require(seconds in 2.0..10.0) { "Meshy makes motions of 2 to 10 seconds" }
+        onProgress?.invoke(5, "Making the motion...")
+        val motionId = createV1Task(TEXT_TO_MOTION_URL, MeshyTextToMotionRequest(prompt, Math.round(seconds * 2) / 2.0), "text-to-motion")
+        pollUntilComplete(
+            maxDuration = maxPollDuration,
+            pollInterval = pollInterval,
+            onProgress = onProgress,
+            progressMessage = { elapsed -> "Making the motion... (${elapsed}s)" },
+            baseProgress = 5,
+            maxProgress = 45,
+            poll = { getV1Task<MeshyMotionTaskResponse>("$TEXT_TO_MOTION_URL/$motionId") },
+            isComplete = { it.status == STATUS_SUCCEEDED },
+            isFailed = { failureMessage(motionId, it.status, it.taskError) },
+            timeoutMessage = "Meshy text-to-motion task $motionId timed out after $maxPollDuration"
+        )
+        onProgress?.invoke(50, "Applying the motion to the rig...")
+        val taskId = createV1Task(ANIMATIONS_URL, MeshyMotionAnimationRequest(rigTaskId, motionId), "animation")
+        val task = pollUntilComplete(
+            maxDuration = maxPollDuration,
+            pollInterval = pollInterval,
+            onProgress = onProgress,
+            progressMessage = { elapsed -> "Applying the motion... (${elapsed}s)" },
+            baseProgress = 50,
+            maxProgress = 90,
+            poll = { getV1Task<MeshyAnimationTaskResponse>("$ANIMATIONS_URL/$taskId") },
+            isComplete = { it.status == STATUS_SUCCEEDED },
+            isFailed = { failureMessage(taskId, it.status, it.taskError) },
+            timeoutMessage = "Meshy animation task $taskId timed out after $maxPollDuration"
+        )
+        return task.result?.animationGlbUrl
+            ?: throw ApiException.GenerationFailed("Animation task $taskId returned no GLB")
+    }
+
     /** Downloads a file produced by a Meshy task. */
     suspend fun download(url: String, what: String): ByteArray = httpClient.downloadFileBytes(url, what)
 
@@ -379,6 +417,7 @@ class MeshyClient(
         const val ANIMATIONS_URL = "https://api.meshy.ai/openapi/v1/animations"
         const val MULTI_IMAGE_TO_3D_URL = "https://api.meshy.ai/openapi/v1/multi-image-to-3d"
         const val RETEXTURE_URL = "https://api.meshy.ai/openapi/v1/retexture"
+        const val TEXT_TO_MOTION_URL = "https://api.meshy.ai/openapi/v1/text-to-motion"
         const val BALANCE_URL = "https://api.meshy.ai/openapi/v1/balance"
         const val LIBRARY_URL = "https://api.meshy.ai/openapi/v1/animations/library"
 

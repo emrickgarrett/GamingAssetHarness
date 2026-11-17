@@ -28,6 +28,7 @@ fun main(args: Array<String>) {
                 GenerateRig(),
                 GenerateAnimation(),
                 GenerateFromImages(),
+                GenerateMotion(),
                 GenerateRetexture(),
                 GenerateMusic(),
                 GenerateSfx()

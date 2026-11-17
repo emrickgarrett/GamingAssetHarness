@@ -179,3 +179,27 @@ data class MeshyLibraryAction(
     val category: String? = null,
     @SerialName("sub_category") val subCategory: String? = null
 )
+
+/** Request body for Meshy's text-to-motion: an animation made from words, 2-10 s, then applied to a rig. */
+@Serializable
+data class MeshyTextToMotionRequest(
+    val prompt: String,
+    val duration: Double,
+    val mode: String = "prime"
+)
+
+/** Status of a text-to-motion task. */
+@Serializable
+data class MeshyMotionTaskResponse(
+    val id: String,
+    val status: String,
+    val progress: Int = 0,
+    @SerialName("task_error") val taskError: MeshyTaskError? = null
+)
+
+/** Request body for applying a text-to-motion clip to a rigged character. */
+@Serializable
+data class MeshyMotionAnimationRequest(
+    @SerialName("rig_task_id") val rigTaskId: String,
+    @SerialName("motion_task_id") val motionTaskId: String
+)
