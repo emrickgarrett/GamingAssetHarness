@@ -27,6 +27,8 @@ fun main(args: Array<String>) {
                 GenerateModel(),
                 GenerateRig(),
                 GenerateAnimation(),
+                GenerateFromImages(),
+                GenerateRetexture(),
                 GenerateMusic(),
                 GenerateSfx()
             ),
@@ -47,6 +49,10 @@ fun main(args: Array<String>) {
                 SculptRun(),
                 SculptBake(),
                 SculptRender()
+            ),
+            MeshyCmd().subcommands(
+                MeshyBalanceCmd(),
+                MeshyLibraryCmd()
             ),
             ConfigShow()
         )

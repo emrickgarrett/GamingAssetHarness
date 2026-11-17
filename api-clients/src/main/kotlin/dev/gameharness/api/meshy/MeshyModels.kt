@@ -127,3 +127,55 @@ data class MeshyImageTo3dRequest(
     @SerialName("ai_model") val aiModel: String = "meshy-6",
     @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("pose_mode") val poseMode: String = ""
 )
+
+/**
+ * Request body for Meshy's image-to-3D (one view, [imageUrl]) or multi-image-to-3D (1-4 views, [imageUrls]), the
+ * images as public URLs or data URIs. [targetPolycount] turns on Meshy's remesh to that many polygons.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class MeshyImagesTo3dRequest(
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("image_url") val imageUrl: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("image_urls") val imageUrls: List<String>? = null,
+    @SerialName("ai_model") val aiModel: String = "latest",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("pose_mode") val poseMode: String = "",
+    @SerialName("should_remesh") val shouldRemesh: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("target_polycount") val targetPolycount: Int? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("texture_prompt") val texturePrompt: String = ""
+)
+
+/** Request body for Meshy's retexture: a new texture for an existing model from a text prompt or a style image. */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class MeshyRetextureRequest(
+    @SerialName("model_url") val modelUrl: String,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("text_style_prompt") val textStylePrompt: String = "",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) @SerialName("image_style_url") val imageStyleUrl: String = "",
+    @SerialName("enable_original_uv") val enableOriginalUv: Boolean = true
+)
+
+/** Request body for Meshy's auto-rigging with a chosen skeleton template (meshyrig, mixamo, ue5_mannequin, ...). */
+@Serializable
+data class MeshyRigTemplateRequest(
+    @SerialName("model_url") val modelUrl: String,
+    @SerialName("height_meters") val heightMeters: Double = 1.7,
+    @SerialName("skeleton_template") val skeletonTemplate: String = "meshyrig",
+    @SerialName("include_fingers") val includeFingers: Boolean = false
+)
+
+/** The account's credit balance (`/openapi/v1/balance`). */
+@Serializable
+data class MeshyBalance(
+    val balance: Int = 0,
+    @SerialName("monthly_credits") val monthlyCredits: Int? = null,
+    @SerialName("permanent_credits") val permanentCredits: Int? = null
+)
+
+/** One action in Meshy's animation library (`/openapi/v1/animations/library`). */
+@Serializable
+data class MeshyLibraryAction(
+    @SerialName("action_id") val actionId: Int,
+    val name: String = "",
+    val category: String? = null,
+    @SerialName("sub_category") val subCategory: String? = null
+)

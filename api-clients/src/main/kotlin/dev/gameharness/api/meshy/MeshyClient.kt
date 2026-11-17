@@ -179,10 +179,14 @@ class MeshyClient(
      * Auto-rigs a humanoid GLB (sent inline as a data URI). Meshy only rigs bipedal characters
      * that face +Z and have at most 380k triangles.
      */
-    suspend fun rig(modelGlb: ByteArray, heightMeters: Double): RigOutcome {
+    suspend fun rig(modelGlb: ByteArray, heightMeters: Double, skeletonTemplate: String = ""): RigOutcome {
         onProgress?.invoke(5, "Uploading model for rigging...")
         val dataUri = "data:application/octet-stream;base64," + Base64.getEncoder().encodeToString(modelGlb)
-        val taskId = createV1Task(RIGGING_URL, MeshyRigRequest(dataUri, heightMeters), "rigging")
+        val taskId = if (skeletonTemplate.isEmpty()) {
+            createV1Task(RIGGING_URL, MeshyRigRequest(dataUri, heightMeters), "rigging")
+        } else {
+            createV1Task(RIGGING_URL, MeshyRigTemplateRequest(dataUri, heightMeters, skeletonTemplate), "rigging")
+        }
         onProgress?.invoke(10, "Rigging character...")
         val task = pollUntilComplete(
             maxDuration = maxPollDuration,
@@ -224,6 +228,65 @@ class MeshyClient(
         )
         return task.result?.animationGlbUrl
             ?: throw ApiException.GenerationFailed("Animation task $taskId returned no GLB")
+    }
+
+    /**
+     * Makes a model from one view (image-to-3D) or 2-4 views of one object (multi-image-to-3D), the images sent
+     * inline. [targetPolycount] above 0 has Meshy remesh it to about that many polygons. Returns the finished task.
+     */
+    suspend fun fromImages(
+        images: List<ByteArray>,
+        poseMode: String = "",
+        targetPolycount: Int = 0,
+        texturePrompt: String = ""
+    ): MeshyTaskResponse {
+        require(images.size in 1..4) { "Meshy takes 1 to 4 images" }
+        val uris = images.map { dataUri(it) }
+        onProgress?.invoke(5, "Uploading ${uris.size} image(s)...")
+        val single = uris.size == 1
+        val url = if (single) IMAGE_TO_3D_URL else MULTI_IMAGE_TO_3D_URL
+        val body = MeshyImagesTo3dRequest(
+            imageUrl = if (single) uris[0] else null,
+            imageUrls = if (single) null else uris,
+            poseMode = poseMode,
+            shouldRemesh = targetPolycount > 0,
+            targetPolycount = targetPolycount.takeIf { it > 0 },
+            texturePrompt = texturePrompt
+        )
+        val taskId = createV1Task(url, body, if (single) "image-to-3D" else "multi-image-to-3D")
+        onProgress?.invoke(10, "Making the model...")
+        return pollTask(taskId, baseProgress = 10, maxProgress = 90, pollBaseUrl = url)
+    }
+
+    /** Gives an existing model a new texture from a prompt (or a style image), keeping its UV layout. */
+    suspend fun retexture(modelGlb: ByteArray, prompt: String, styleImage: ByteArray? = null): MeshyTaskResponse {
+        val model = "data:application/octet-stream;base64," + Base64.getEncoder().encodeToString(modelGlb)
+        onProgress?.invoke(5, "Uploading model for retexturing...")
+        val body = if (styleImage != null) {
+            MeshyRetextureRequest(model, imageStyleUrl = dataUri(styleImage))
+        } else {
+            MeshyRetextureRequest(model, textStylePrompt = prompt)
+        }
+        val taskId = createV1Task(RETEXTURE_URL, body, "retexture")
+        onProgress?.invoke(10, "Retexturing...")
+        return pollTask(taskId, baseProgress = 10, maxProgress = 90, pollBaseUrl = RETEXTURE_URL)
+    }
+
+    /** The account's credits (free to ask). */
+    suspend fun balance(): MeshyBalance = getV1Task(BALANCE_URL)
+
+    /** Meshy's animation library, optionally searched by name (free to ask). */
+    suspend fun library(search: String = ""): List<MeshyLibraryAction> =
+        getV1Task(if (search.isEmpty()) LIBRARY_URL else "$LIBRARY_URL?search=${search.encodeURLParameter()}")
+
+    private fun dataUri(image: ByteArray): String {
+        val mime = when {
+            image.size > 3 && image[0] == 0x89.toByte() && image[1] == 'P'.code.toByte() -> "image/png"
+            image.size > 3 && image[0] == 0xFF.toByte() && image[1] == 0xD8.toByte() -> "image/jpeg"
+            image.size > 12 && String(image, 8, 4, Charsets.US_ASCII) == "WEBP" -> "image/webp"
+            else -> "image/png"
+        }
+        return "data:$mime;base64," + Base64.getEncoder().encodeToString(image)
     }
 
     /** Downloads a file produced by a Meshy task. */
@@ -305,6 +368,10 @@ class MeshyClient(
         const val IMAGE_TO_3D_URL = "https://api.meshy.ai/openapi/v1/image-to-3d" // (v1: only text-to-3d is v2; v2 here is a 404)
         const val RIGGING_URL = "https://api.meshy.ai/openapi/v1/rigging"
         const val ANIMATIONS_URL = "https://api.meshy.ai/openapi/v1/animations"
+        const val MULTI_IMAGE_TO_3D_URL = "https://api.meshy.ai/openapi/v1/multi-image-to-3d"
+        const val RETEXTURE_URL = "https://api.meshy.ai/openapi/v1/retexture"
+        const val BALANCE_URL = "https://api.meshy.ai/openapi/v1/balance"
+        const val LIBRARY_URL = "https://api.meshy.ai/openapi/v1/animations/library"
 
         /** Task status returned when generation completes successfully. */
         const val STATUS_SUCCEEDED = "SUCCEEDED"
